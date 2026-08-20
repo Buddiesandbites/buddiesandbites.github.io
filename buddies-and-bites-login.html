@@ -3,6 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<link rel="manifest" href="manifest-admin.json">
+<meta name="theme-color" content="#572516">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BnB Admin">
 <title>Buddies and Bites — Admin Login</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=DM+Sans:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -54,6 +60,14 @@
   .hub-link .txt span{ font-size:11.5px; color:var(--ink-soft); }
   .logout-btn{ margin-top:18px; background:none; border:none; color:var(--rust); font-size:12.5px; text-decoration:underline; cursor:pointer; }
 </style>
+
+<script>
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw-admin.js').catch(e => console.error('SW registration failed', e));
+    });
+  }
+</script>
 </head>
 <body>
 

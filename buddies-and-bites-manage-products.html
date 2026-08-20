@@ -3,6 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<link rel="manifest" href="manifest-admin.json">
+<meta name="theme-color" content="#572516">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BnB Admin">
 <title>Buddies and Bites — Manage Products</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=DM+Sans:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -132,6 +138,14 @@
   body.read-only #exportExcelBtn{ display:block !important; }
   .header-logo{ width:130px; height:73px; border-radius:11px; overflow:hidden; margin:0 auto 8px; border:1.5px solid var(--gold); background:var(--paper); }
 </style>
+
+<script>
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw-admin.js').catch(e => console.error('SW registration failed', e));
+    });
+  }
+</script>
 </head>
 <body>
 
@@ -174,6 +188,11 @@
       </label>
     </div>
     <div class="field">
+      <label>Flavour / style hint for AI (optional)</label>
+      <input type="text" id="flavourHintInput" placeholder="e.g. dark chocolate, birthday theme, red velvet">
+    </div>
+    <button class="btn btn-primary" id="suggestAIBtn" type="button" style="margin-bottom:16px;">✨ Suggest name &amp; description with AI</button>
+    <div class="field">
       <label>Cake name</label>
       <input type="text" id="nameInput" placeholder="e.g. Black Forest">
     </div>
@@ -206,6 +225,22 @@
     <div class="btn-row">
       <button class="btn btn-ghost" id="cancelEditBtn" style="display:none;">Cancel edit</button>
       <button class="btn btn-primary" id="saveProductBtn">Save cake</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>AI Settings</h2>
+    <div class="field">
+      <label>Gemini API key (for product suggestions, this page only)</label>
+      <input type="text" id="geminiKeyInput" placeholder="Paste your free Gemini API key here">
+    </div>
+    <div class="field">
+      <label>Gemini API key for shop chatbot (recommended: a separate key)</label>
+      <input type="text" id="geminiShopKeyInput" placeholder="Paste a separate key for the public customer chat">
+    </div>
+    <button class="btn btn-primary" id="saveGeminiKeyBtn">Save AI keys</button>
+    <div class="hint">
+      Free keys from <strong>aistudio.google.com</strong> → "Get API key". The shop chatbot key is used on your public customer page, so anyone visiting could technically see it in their browser's network traffic — using a <em>separate</em> key here (instead of reusing the same one as above) limits the damage if it's ever misused, since you can regenerate just that one without affecting product suggestions.
     </div>
   </div>
 
@@ -246,11 +281,13 @@
   firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
   const productsCol = db.collection('products');
+  const geminiConfigDoc = db.collection('meta').doc('geminiConfig');
 
   let products = [];
   let editingId = null;
   let pendingPhoto = null;
   let pendingQr = null;
+  let geminiApiKey = '';
 
   // ---------- Image compression ----------
   function compressImage(file, maxW, quality){
@@ -456,6 +493,71 @@
     products.sort((a,b) => (a.category||'').localeCompare(b.category||'') || (a.name||'').localeCompare(b.name||''));
     renderProducts();
   }, err => { console.error(err); toast('Could not sync products'); });
+
+  // ---------- AI (Gemini) product suggestions ----------
+  geminiConfigDoc.get().then(doc => {
+    if(doc.exists){
+      geminiApiKey = doc.data().apiKey || '';
+      $('geminiKeyInput').value = geminiApiKey;
+      $('geminiShopKeyInput').value = doc.data().shopApiKey || '';
+    }
+  }).catch(e => console.error(e));
+
+  $('saveGeminiKeyBtn').addEventListener('click', async () => {
+    if(isReadOnly) return;
+    const key = $('geminiKeyInput').value.trim();
+    const shopKey = $('geminiShopKeyInput').value.trim();
+    try{
+      await geminiConfigDoc.set({ apiKey: key, shopApiKey: shopKey }, { merge: true });
+      geminiApiKey = key;
+      toast('AI keys saved');
+    }catch(e){ toast('Could not save — check your connection'); }
+  });
+
+  $('suggestAIBtn').addEventListener('click', async () => {
+    if(!pendingPhoto){ toast('Upload a photo first'); return; }
+    if(!geminiApiKey){ toast('Add your Gemini API key in AI Settings first'); return; }
+    const hint = $('flavourHintInput').value.trim();
+    const btn = $('suggestAIBtn');
+    const originalLabel = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Thinking…';
+    try{
+      const match = pendingPhoto.match(/^data:(image\/[a-zA-Z]+);base64,(.+)$/);
+      if(!match) throw new Error('Unexpected image format');
+      const mimeType = match[1];
+      const base64Data = match[2];
+      const prompt = 'You are a product copywriter for an Indian bakery called "Buddies and Bites". Look at this cake photo'
+        + (hint ? ' and this flavour/style hint: "' + hint + '"' : '')
+        + '. Suggest: 1) a short, appealing product name (max 6 words, no quotes), and 2) a 1-2 sentence mouth-watering menu description. '
+        + 'Respond with ONLY valid JSON, no markdown formatting, in exactly this shape: {"name": "...", "description": "..."}';
+
+      const model = 'gemini-2.0-flash';
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(geminiApiKey), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [ { text: prompt }, { inline_data: { mime_type: mimeType, data: base64Data } } ] }]
+        })
+      });
+      if(!res.ok){
+        const errBody = await res.text();
+        console.error('Gemini API error', res.status, errBody);
+        throw new Error('AI request failed (' + res.status + ')');
+      }
+      const data = await res.json();
+      let text = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
+      if(!text) throw new Error('No response from AI');
+      text = text.trim().replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```$/, '').trim();
+      const parsed = JSON.parse(text);
+      if(parsed.name) $('nameInput').value = parsed.name;
+      if(parsed.description) $('specsInput').value = parsed.description;
+      toast('AI suggestion added — feel free to edit it');
+    }catch(e){
+      console.error('AI suggestion error', e);
+      toast('Could not get an AI suggestion — check your API key and connection');
+    }
+    btn.disabled = false; btn.textContent = originalLabel;
+  });
 
   // ---------- Excel export (for Zomato / other listing use) ----------
   function toJpegDataUrl(dataUrl){

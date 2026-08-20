@@ -3,6 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<link rel="manifest" href="manifest-admin.json">
+<meta name="theme-color" content="#572516">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BnB Admin">
 <title>Buddies and Bites — Order Ledger</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,600;0,9..144,700;1,9..144,500&family=DM+Sans:wght@400;500;700&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
@@ -278,6 +284,14 @@
   body.read-only .chip-btn,
   body.read-only .fab{ display:none !important; }
 </style>
+
+<script>
+  if('serviceWorker' in navigator){
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw-admin.js').catch(e => console.error('SW registration failed', e));
+    });
+  }
+</script>
 </head>
 <body>
 
@@ -314,7 +328,10 @@
     </button>
   </div>
   <div class="next-up" id="nextUp"></div>
-  <div style="margin-top:8px; font-size:11px; color:rgba(247,241,228,0.55); font-family:'Space Mono',monospace;" id="deviceClock"></div>
+  <div style="margin-top:8px; font-size:11px; color:rgba(247,241,228,0.55); font-family:'Space Mono',monospace; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+    <span id="deviceClock"></span>
+    <span id="liveSyncBadge" style="display:inline-flex; align-items:center; gap:4px;"><span style="width:7px;height:7px;border-radius:50%;background:#7BB86A;display:inline-block;"></span>Live · updated <span id="lastSyncedAgo">just now</span></span>
+  </div>
 </header>
 
 <div class="tabs" id="tabs"></div>
@@ -551,6 +568,7 @@
   const ordersCollection = db.collection('orders');
   let unsubscribeOrders = null;
   let initialOrdersSnapshotDone = false;
+  let lastSyncedAt = null;
 
   function subscribeOrders(){
     unsubscribeOrders = ordersCollection.onSnapshot(
@@ -566,14 +584,25 @@
           });
         }
         orders = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+        lastSyncedAt = new Date();
         render();
+        updateLiveSyncBadge();
         initialOrdersSnapshotDone = true;
       },
       (err) => {
         console.error('sync error', err);
         toast("Can't sync with the shared database — check your connection");
+        const badge = document.getElementById('liveSyncBadge');
+        if(badge) badge.innerHTML = '<span style="width:7px;height:7px;border-radius:50%;background:var(--rust);display:inline-block;"></span>Offline — trying to reconnect';
       }
     );
+  }
+
+  function updateLiveSyncBadge(){
+    const el = document.getElementById('lastSyncedAgo');
+    if(!el || !lastSyncedAt) return;
+    const secs = Math.round((Date.now() - lastSyncedAt.getTime()) / 1000);
+    el.textContent = secs < 5 ? 'just now' : (secs < 60 ? secs + 's ago' : Math.round(secs/60) + 'm ago');
   }
 
   function notifyNewCustomerOrder(o){
@@ -1061,6 +1090,15 @@
     setInterval(checkReminders, 60000);
     setInterval(render, 60000);
     setInterval(updateDeviceClock, 30000);
+    setInterval(updateLiveSyncBadge, 15000);
+
+    document.addEventListener('visibilitychange', () => {
+      if(document.visibilityState === 'visible'){
+        updateDeviceClock();
+        updateLiveSyncBadge();
+        checkReminders();
+      }
+    });
   }
   function updateDeviceClock(){
     const el = document.getElementById('deviceClock');
