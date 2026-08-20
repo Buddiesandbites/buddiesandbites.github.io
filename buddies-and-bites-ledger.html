@@ -121,6 +121,20 @@
     display:flex; align-items:center; justify-content:center; color:var(--ink-soft);
     border-right:1px solid var(--line);
   }
+  .ticket-photo.has-photo{ cursor:zoom-in; }
+
+  /* ---------- Photo lightbox ---------- */
+  .photo-lightbox{
+    position:fixed; inset:0; background:rgba(20,14,12,0.92); z-index:80;
+    display:none; align-items:center; justify-content:center; padding:20px;
+  }
+  .photo-lightbox.open{ display:flex; }
+  .photo-lightbox img{ max-width:100%; max-height:100%; border-radius:10px; box-shadow:0 10px 40px rgba(0,0,0,0.5); }
+  .photo-lightbox-close{
+    position:absolute; top:16px; right:16px; width:40px; height:40px; border-radius:50%;
+    background:rgba(255,255,255,0.12); border:1.5px solid rgba(255,255,255,0.35); color:#fff;
+    display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:20px;
+  }
   .ticket-photo svg{ width:30px; height:30px; opacity:.35; }
   .ticket-info{ flex:1; padding:12px 12px 10px 14px; min-width:0; }
   .ticket-info .desc{ font-family:'Fraunces', serif; font-size:16.5px; font-weight:600; line-height:1.25; margin:0 0 4px; word-break:break-word;}
@@ -451,6 +465,11 @@
 </div><!-- /appRoot -->
 
 <div class="toast" id="toast"></div>
+
+<div class="photo-lightbox" id="photoLightbox">
+  <button class="photo-lightbox-close" id="photoLightboxClose">✕</button>
+  <img id="photoLightboxImg" src="" alt="Cake photo">
+</div>
 
 <script>
 (function(){
@@ -937,7 +956,7 @@
       card.className = 'ticket' + (isDelivered(order) ? ' completed' : '');
       card.innerHTML = `
         <div class="ticket-top">
-          <div class="ticket-photo">${order.photo ? '<img src="'+order.photo+'" style="width:100%;height:100%;object-fit:cover;">' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>'}</div>
+          <div class="ticket-photo${order.photo ? ' has-photo' : ''}">${order.photo ? '<img src="'+order.photo+'" style="width:100%;height:100%;object-fit:cover;">' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>'}</div>
           <div class="ticket-info">
             <p class="cust-name">${order.orderNumber ? '<span class="mono" style="background:'+(order.orderType==='custom_request'?'var(--rust)':'var(--gold)')+';color:#fff;padding:1px 7px;border-radius:5px;font-size:11px;margin-right:6px;">'+(order.orderType==='custom_request'?'🎨 ':'#')+escapeHtml(order.orderNumber)+'</span>' : ''}${escapeHtml(order.customerName || 'Walk-in customer')}${order.customerPhone ? ' · <a class="call-link" href="tel:'+escapeHtml(order.customerPhone)+'">'+escapeHtml(order.customerPhone)+'</a>' : ''}</p>
             ${order.orderType === 'custom_request'
@@ -985,6 +1004,10 @@
           `}
         </div>
       `;
+      if(order.photo){
+        const photoEl = card.querySelector('.ticket-photo');
+        photoEl.addEventListener('click', () => openPhotoLightbox(order.photo));
+      }
       if(isPendingAcceptance(order)){
         card.querySelector('.accept-btn').addEventListener('click', async () => {
           order.acceptanceStatus = 'accepted';
@@ -1018,8 +1041,18 @@
           });
         }
         card.querySelector('.delivered-btn').addEventListener('click', async () => {
-          order.delivered = !isDelivered(order);
+          const nowDelivered = !isDelivered(order);
+          order.delivered = nowDelivered;
           delete order.status;
+          if(nowDelivered){
+            // Marking as delivered automatically marks the cake as baked and fully paid.
+            order.baked = true;
+            if(!order.bakedLocation) order.bakedLocation = 'icing_room';
+            if(order.price){
+              order.advancePaid = order.price;
+              order.paymentStatus = 'confirmed';
+            }
+          }
           await saveOrder(order);
           render();
         });
@@ -1028,6 +1061,20 @@
       list.appendChild(card);
     });
   }
+
+  // ---------- Photo lightbox ----------
+  const photoLightbox = $('photoLightbox');
+  const photoLightboxImg = $('photoLightboxImg');
+  function openPhotoLightbox(src){
+    photoLightboxImg.src = src;
+    photoLightbox.classList.add('open');
+  }
+  function closePhotoLightbox(){
+    photoLightbox.classList.remove('open');
+    photoLightboxImg.src = '';
+  }
+  $('photoLightboxClose').addEventListener('click', closePhotoLightbox);
+  photoLightbox.addEventListener('click', (e) => { if(e.target === photoLightbox) closePhotoLightbox(); });
 
   // ---------- Notifications ----------
   function updateBellUI(){

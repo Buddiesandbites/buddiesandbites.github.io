@@ -83,6 +83,14 @@
     display:flex; gap:12px; padding:12px; border:1px solid var(--line); border-radius:12px; margin-bottom:10px; background:#fff;
   }
   .product-item.inactive{ opacity:.5; }
+
+  .cat-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:10px 12px; border:1px solid var(--line); border-radius:10px; margin-bottom:8px; background:#fff;
+  }
+  .cat-row.cat-disabled{ opacity:.55; }
+  .cat-row .cat-name{ font-weight:700; font-size:14px; }
+  .cat-row .cat-hint{ font-size:11px; color:var(--rust); margin-top:2px; }
   .product-item img{ width:64px; height:64px; border-radius:9px; object-fit:cover; flex-shrink:0; background:var(--cream); }
   .product-item .no-img{ width:64px; height:64px; border-radius:9px; background:var(--cream); flex-shrink:0; display:flex; align-items:center; justify-content:center; color:var(--ink-soft); }
   .product-item .info{ flex:1; min-width:0; }
@@ -245,6 +253,12 @@
   </div>
 
   <div class="card">
+    <h2>Categories</h2>
+    <div class="hint" style="margin-bottom:10px;">Turn a category off to hide every cake in it from the shop, without touching individual cakes.</div>
+    <div id="categoryList"></div>
+  </div>
+
+  <div class="card">
     <h2>Your cakes <span class="mono" id="productCount" style="font-size:13px;color:var(--ink-soft);"></span></h2>
     <button class="btn btn-primary" id="exportExcelBtn" style="margin-bottom:14px;">📊 Export to Excel (for Zomato / listings)</button>
     <div id="productList"></div>
@@ -282,8 +296,10 @@
   const db = firebase.firestore();
   const productsCol = db.collection('products');
   const geminiConfigDoc = db.collection('meta').doc('geminiConfig');
+  const categoryStatusDoc = db.collection('meta').doc('categoryStatus');
 
   let products = [];
+  let categoryStatus = {};
   let editingId = null;
   let pendingPhoto = null;
   let pendingQr = null;
@@ -492,7 +508,51 @@
     products = snap.docs.map(d => ({ ...d.data(), id: d.id }));
     products.sort((a,b) => (a.category||'').localeCompare(b.category||'') || (a.name||'').localeCompare(b.name||''));
     renderProducts();
+    renderCategories();
   }, err => { console.error(err); toast('Could not sync products'); });
+
+  categoryStatusDoc.onSnapshot(doc => {
+    categoryStatus = doc.exists ? (doc.data() || {}) : {};
+    renderCategories();
+  }, err => { console.error(err); });
+
+  // ---------- Category enable/disable ----------
+  async function toggleCategory(cat){
+    if(isReadOnly) return;
+    const isDisabled = categoryStatus[cat] === false;
+    try{
+      await categoryStatusDoc.set({ [cat]: isDisabled ? true : false }, { merge: true });
+    }catch(e){ toast('Could not update category'); }
+  }
+
+  function renderCategories(){
+    const list = $('categoryList');
+    if(!list) return;
+    const cats = Array.from(new Set(products.map(p => p.category || 'Uncategorised'))).sort((a,b) => a.localeCompare(b));
+    if(cats.length === 0){
+      list.innerHTML = '<div class="hint">Categories will appear here once you add cakes.</div>';
+      return;
+    }
+    list.innerHTML = '';
+    cats.forEach(cat => {
+      const isOff = categoryStatus[cat] === false;
+      const count = products.filter(p => (p.category || 'Uncategorised') === cat).length;
+      const row = document.createElement('div');
+      row.className = 'cat-row' + (isOff ? ' cat-disabled' : '');
+      row.innerHTML = `
+        <div>
+          <div class="cat-name">${escapeHtml(cat)} <span class="mono" style="font-size:11px;color:var(--ink-soft);">(${count})</span></div>
+          ${isOff ? '<div class="cat-hint">Hidden from shop</div>' : ''}
+        </div>
+        <label class="switch">
+          <input type="checkbox" class="cat-toggle" ${isOff ? '' : 'checked'}>
+          <span class="slider"></span>
+        </label>
+      `;
+      row.querySelector('.cat-toggle').addEventListener('change', () => toggleCategory(cat));
+      list.appendChild(row);
+    });
+  }
 
   // ---------- AI (Gemini) product suggestions ----------
   geminiConfigDoc.get().then(doc => {
