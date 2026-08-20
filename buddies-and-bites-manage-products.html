@@ -72,6 +72,18 @@
     font-size:13px; font-weight:700; cursor:pointer; width:100%; margin-top:2px;
   }
 
+  .flavour-chip{
+    display:inline-flex; align-items:center; gap:6px; background:var(--cream); border:1.5px solid var(--line);
+    color:var(--plum); font-size:12.5px; font-weight:700; padding:5px 6px 5px 12px; border-radius:999px;
+  }
+  .flavour-chip button{
+    width:18px; height:18px; border-radius:50%; border:none; background:rgba(87,37,22,.12); color:var(--plum);
+    font-size:13px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0;
+  }
+  .flavour-add-row{ display:flex; gap:8px; }
+  .flavour-add-row input{ flex:1; }
+  .flavour-add-row button{ padding:0 16px; border-radius:9px; white-space:nowrap; }
+
   .btn{ padding:12px; border-radius:10px; border:none; font-weight:700; font-size:14.5px; cursor:pointer; font-family:'DM Sans',sans-serif; }
   .btn-primary{ background:var(--plum); color:var(--cream); width:100%; }
   .btn-ghost{ background:transparent; color:var(--ink-soft); border:1.5px solid var(--line); }
@@ -230,6 +242,16 @@
       <div class="hint">MRP is the struck-through price, Sale price is what the customer actually pays.</div>
     </div>
 
+    <div class="field">
+      <label>Flavour options (optional)</label>
+      <div id="flavourChips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;"></div>
+      <div class="flavour-add-row">
+        <input type="text" id="flavourNameInput" placeholder="e.g. Chocolate, Red Velvet, Vanilla">
+        <button class="btn btn-ghost" id="addFlavourBtn" type="button">+ Add</button>
+      </div>
+      <div class="hint">If you add flavours here, customers ordering this cake will see an optional dropdown so they can pick a flavour for the same design — leave empty if this cake only comes in one flavour.</div>
+    </div>
+
     <div class="btn-row">
       <button class="btn btn-ghost" id="cancelEditBtn" style="display:none;">Cancel edit</button>
       <button class="btn btn-primary" id="saveProductBtn">Save cake</button>
@@ -304,6 +326,7 @@
   let pendingPhoto = null;
   let pendingQr = null;
   let geminiApiKey = '';
+  let pendingFlavours = [];
 
   // ---------- Image compression ----------
   function compressImage(file, maxW, quality){
@@ -364,6 +387,44 @@
   }
   $('addSizeBtn').addEventListener('click', () => addSizeRow());
 
+  // ---------- Flavour options ----------
+  const flavourChipsWrap = $('flavourChips');
+  function renderFlavourChips(){
+    flavourChipsWrap.innerHTML = '';
+    if(pendingFlavours.length === 0){
+      flavourChipsWrap.innerHTML = '<span class="hint" style="margin:0;">No flavour options added yet.</span>';
+      return;
+    }
+    pendingFlavours.forEach((f, idx) => {
+      const chip = document.createElement('span');
+      chip.className = 'flavour-chip';
+      chip.innerHTML = `${escapeHtml(f)} <button type="button" title="Remove">×</button>`;
+      chip.querySelector('button').addEventListener('click', () => {
+        pendingFlavours.splice(idx, 1);
+        renderFlavourChips();
+      });
+      flavourChipsWrap.appendChild(chip);
+    });
+  }
+  function addFlavourFromInput(){
+    const input = $('flavourNameInput');
+    const val = input.value.trim();
+    if(!val) return;
+    if(pendingFlavours.some(f => f.toLowerCase() === val.toLowerCase())){
+      toast('That flavour is already added');
+      input.value = ''; input.focus();
+      return;
+    }
+    pendingFlavours.push(val);
+    input.value = '';
+    input.focus();
+    renderFlavourChips();
+  }
+  $('addFlavourBtn').addEventListener('click', addFlavourFromInput);
+  $('flavourNameInput').addEventListener('keydown', (e) => {
+    if(e.key === 'Enter'){ e.preventDefault(); addFlavourFromInput(); }
+  });
+
   function readSizeRows(){
     return Array.from(sizeRows.querySelectorAll('.size-row')).map(row => {
       const label = row.querySelector('.size-label').value.trim();
@@ -382,6 +443,7 @@
     photoLabel.style.display = 'block'; photoChangeHint.style.display = 'none';
     photoInput.value = '';
     sizeRows.innerHTML = ''; addSizeRow();
+    pendingFlavours = []; renderFlavourChips();
     $('cancelEditBtn').style.display = 'none';
   }
   resetForm();
@@ -394,6 +456,7 @@
     const category = $('categoryInput').value.trim() || 'Uncategorised';
     const specs = $('specsInput').value.trim();
     const sizes = readSizeRows();
+    const flavours = pendingFlavours.slice();
     if(!name){ toast('Add a cake name'); return; }
     if(sizes.length === 0){ toast('Add at least one size with a price'); return; }
 
@@ -402,7 +465,7 @@
       if(editingId){
         const existing = products.find(p => p.id === editingId);
         const data = {
-          name, category, specs, sizes,
+          name, category, specs, sizes, flavours,
           photo: pendingPhoto !== null ? pendingPhoto : (existing ? existing.photo || null : null),
           photoThumb: pendingPhotoThumb !== null ? pendingPhotoThumb : (existing ? existing.photoThumb || existing.photo || null : null),
           active: existing ? (existing.active !== false) : true,
@@ -413,7 +476,7 @@
       } else {
         const id = uid();
         await productsCol.doc(id).set({
-          name, category, specs, sizes, photo: pendingPhoto, photoThumb: pendingPhotoThumb, active: true,
+          name, category, specs, sizes, flavours, photo: pendingPhoto, photoThumb: pendingPhotoThumb, active: true,
           createdAt: new Date().toISOString()
         });
         toast('Cake added');
@@ -443,6 +506,8 @@
     sizeRows.innerHTML = '';
     (p.sizes || []).forEach(s => addSizeRow(s.label, s.mrp, s.sale));
     if((p.sizes || []).length === 0) addSizeRow();
+    pendingFlavours = (p.flavours || []).slice();
+    renderFlavourChips();
     $('cancelEditBtn').style.display = 'block';
     window.scrollTo({top:0, behavior:'smooth'});
   }
@@ -482,6 +547,7 @@
           <h4>${escapeHtml(p.name)}</h4>
           ${p.category ? '<div style="font-size:10.5px;color:var(--gold);font-weight:700;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px;">'+escapeHtml(p.category)+'</div>' : ''}
           <div class="sizes">${escapeHtml(sizesTxt)}</div>
+          ${(p.flavours && p.flavours.length) ? '<div class="hint" style="margin-top:2px;">🍰 '+p.flavours.length+' flavour option'+(p.flavours.length>1?'s':'')+'</div>' : ''}
           ${p.active === false ? '<div class="hint" style="color:var(--rust);">Hidden from shop</div>' : ''}
         </div>
         <div class="actions">

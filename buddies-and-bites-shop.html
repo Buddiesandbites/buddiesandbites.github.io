@@ -340,6 +340,13 @@
     <div class="field"><label>Choose size</label></div>
     <div class="size-chips" id="sizeChips"></div>
 
+    <div class="field" id="flavourFieldWrap" style="display:none;">
+      <label>Flavour (optional)</label>
+      <select id="flavourSelect">
+        <option value="">Same as shown / no preference</option>
+      </select>
+    </div>
+
     <div class="field"><label>Quantity</label></div>
     <div class="qty-stepper">
       <button class="qty-btn" id="qtyMinus">−</button>
@@ -1100,6 +1107,15 @@ Instructions:
     $('qtyVal').textContent = qty;
     $('cakeMessageInput').value = '';
     renderSizeChips();
+    const flavourWrap = $('flavourFieldWrap'), flavourSelect = $('flavourSelect');
+    if(p.flavours && p.flavours.length){
+      flavourSelect.innerHTML = '<option value="">Same as shown / no preference</option>' +
+        p.flavours.map(f => '<option value="'+escapeHtml(f)+'">'+escapeHtml(f)+'</option>').join('');
+      flavourWrap.style.display = 'block';
+    } else {
+      flavourSelect.innerHTML = '<option value="">Same as shown / no preference</option>';
+      flavourWrap.style.display = 'none';
+    }
     $('detailBackdrop').classList.add('open');
   }
   function renderSizeChips(){
@@ -1125,12 +1141,15 @@ Instructions:
 
   $('continueToCheckoutBtn').addEventListener('click', () => {
     if(!selectedSize){ toast('Choose a size first'); return; }
+    const flavourWrap = $('flavourFieldWrap');
+    const flavourChoice = (flavourWrap.style.display !== 'none') ? $('flavourSelect').value.trim() : '';
     orderDraft = {
       productName: selectedProduct.name,
       sizeLabel: selectedSize.label,
       unitPrice: selectedSize.sale,
       qty,
-      cakeMessage: $('cakeMessageInput').value.trim()
+      cakeMessage: $('cakeMessageInput').value.trim(),
+      flavourChoice
     };
     $('detailBackdrop').classList.remove('open');
     $('deliveryDateInput').value = todayStr();
@@ -1149,6 +1168,7 @@ Instructions:
     orderDraft.total = total;
     $('summaryBox').innerHTML = `
       <div class="summary-row"><span>${escapeHtml(orderDraft.productName)} (${escapeHtml(orderDraft.sizeLabel)}) × ${orderDraft.qty}</span><span>${rupee(subtotal)}</span></div>
+      ${orderDraft.flavourChoice ? '<div class="summary-row"><span>Flavour</span><span style="max-width:150px;text-align:right;">'+escapeHtml(orderDraft.flavourChoice)+'</span></div>' : ''}
       ${orderDraft.cakeMessage ? '<div class="summary-row"><span>Message</span><span style="max-width:150px;text-align:right;">'+escapeHtml(orderDraft.cakeMessage)+'</span></div>' : ''}
       <div class="summary-row"><span>Delivery charge</span><span>${charge !== null ? rupee(charge) : (isOther ? 'To be confirmed' : '—')}</span></div>
       <div class="summary-row total"><span>Total to pay</span><span>${rupee(total)}${isOther ? ' + delivery' : ''}</span></div>
@@ -1276,7 +1296,8 @@ Instructions:
         customerPhone: orderDraft.customerPhone,
         customerAddress: orderDraft.customerAddress,
         staffName: 'Online order',
-        flavour: orderDraft.productName + ' — ' + orderDraft.sizeLabel,
+        flavour: orderDraft.productName + ' — ' + orderDraft.sizeLabel + (orderDraft.flavourChoice ? ' · Flavour: ' + orderDraft.flavourChoice : ''),
+        flavourChoice: orderDraft.flavourChoice || null,
         description: orderDraft.cakeMessage || '',
         quantity: orderDraft.qty,
         cakeSubtotal: orderDraft.subtotal,
