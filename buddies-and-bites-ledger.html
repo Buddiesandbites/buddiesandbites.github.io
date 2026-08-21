@@ -299,6 +299,12 @@
   body.read-only .icon-btn.edit-btn,
   body.read-only .chip-btn,
   body.read-only .fab{ display:none !important; }
+
+  .hungerbay-sync{margin:10px 0 0;padding:10px 12px;border:1px solid rgba(247,241,228,.16);border-radius:12px;background:rgba(255,255,255,.04);display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:11px;}
+  .hungerbay-sync .hb-dot{width:8px;height:8px;border-radius:50%;background:#7BB86A;display:inline-block;}
+  .hungerbay-sync button{border:1px solid rgba(247,241,228,.25);background:rgba(255,255,255,.06);color:#f7f1e4;border-radius:8px;padding:6px 10px;font:700 11px 'Space Mono',monospace;cursor:pointer;}
+  .hungerbay-sync button:disabled{opacity:.5;cursor:wait;}
+  .hb-badge{display:inline-flex;align-items:center;gap:4px;background:#fff2c2;color:#6e5200;border:1px solid #e5c85d;border-radius:999px;padding:2px 7px;font:700 10px 'Space Mono',monospace;}
 </style>
 
 <script>
@@ -344,6 +350,12 @@
     </button>
   </div>
   <div class="next-up" id="nextUp"></div>
+  <div class="hungerbay-sync" id="hungerbaySyncPanel">
+    <span class="hb-dot" id="hungerbaySyncDot"></span>
+    <strong>HungerBay</strong>
+    <span id="hungerbaySyncStatus">Order sync ready</span>
+    <button id="hungerbaySyncBtn" type="button">↻ Sync orders now</button>
+  </div>
   <div style="margin-top:8px; font-size:11px; color:rgba(247,241,228,0.55); font-family:'Space Mono',monospace; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
     <span id="deviceClock"></span>
     <span id="liveSyncBadge" style="display:inline-flex; align-items:center; gap:4px;"><span style="width:7px;height:7px;border-radius:50%;background:#7BB86A;display:inline-block;"></span>Live · updated <span id="lastSyncedAgo">just now</span></span>
@@ -486,6 +498,9 @@
   const priceInput = $('priceInput'), advanceInput = $('advanceInput'), remainingNote = $('remainingNote');
   const saveBtn = $('saveBtn'), cancelBtn = $('cancelBtn'), deleteBtn = $('deleteBtn'), fabBtn = $('fabBtn'), bellBtn = $('bellBtn'), bellDot = $('bellDot');
   const toastEl = $('toast');
+  const hungerbaySyncBtn = $('hungerbaySyncBtn');
+  const hungerbaySyncStatus = $('hungerbaySyncStatus');
+  const HUNGERBAY_SYNC_API = window.BNB_HUNGERBAY_SYNC_API || '/sync/hungerbay';
 
   let orders = [];
   let currentFilter = 'active';
@@ -505,6 +520,25 @@
   function isDelivered(order){
     return order.delivered === true || order.status === 'completed';
   }
+  function isHungerBay(order){ return order && order.source === 'hungerbay'; }
+  function hungerBayLabel(order){ return isHungerBay(order) ? '<span class="hb-badge">HUNGERBAY #' + escapeHtml(order.hungerbayOrderId || order.orderNumber || '') + '</span>' : ''; }
+  async function syncHungerBayOrders(){
+    if(isReadOnly){ toast('View-only account cannot run a sync'); return; }
+    hungerbaySyncBtn.disabled = true;
+    hungerbaySyncStatus.textContent = 'Syncing…';
+    try{
+      const res = await fetch(HUNGERBAY_SYNC_API, { method:'POST', headers:{'Content-Type':'application/json'} });
+      const data = await res.json().catch(()=>({}));
+      if(!res.ok || data.ok === false) throw new Error(data.error || 'Sync failed');
+      hungerbaySyncStatus.textContent = 'Synced ' + (data.count || 0) + ' order(s)';
+      toast('✓ HungerBay orders synced');
+    }catch(e){
+      console.error('HungerBay sync error', e);
+      hungerbaySyncStatus.textContent = 'Sync unavailable — check integration server';
+      toast('HungerBay sync failed');
+    }finally{ hungerbaySyncBtn.disabled = false; }
+  }
+  hungerbaySyncBtn.addEventListener('click', syncHungerBayOrders);
 
   // ---------- WhatsApp messaging ----------
   function toWhatsAppNumber(phone){
@@ -983,6 +1017,7 @@
   function counts(){
     const now = new Date();
     const newOrders = orders.filter(o => isPendingAcceptance(o)).length;
+    const hungerbay = orders.filter(o => isHungerBay(o)).length;
     const active = orders.filter(o => !isDelivered(o) && !isPendingAcceptance(o) && !isRejected(o));
     const overdue = active.filter(o => new Date(o.deliveryDateTime) < now).length;
     const today = active.filter(o => {
@@ -990,13 +1025,14 @@
       return dt >= now && calendarDayDiff(dt, now) === 0;
     }).length;
     const completed = orders.filter(o => isDelivered(o)).length;
-    return { all: orders.length, active: active.length, overdue, today, completed, newOrders };
+    return { all: orders.length, active: active.length, overdue, today, completed, newOrders, hungerbay };
   }
 
   function renderTabs(){
     const c = counts();
     const defs = [
       {key:'newOrders', label:'🔔 New Orders', count:c.newOrders},
+      {key:'hungerbay', label:'🍽 HungerBay', count:c.hungerbay},
       {key:'active', label:'Active', count:c.active},
       {key:'today', label:'Today', count:c.today},
       {key:'overdue', label:'Overdue', count:c.overdue},
@@ -1031,6 +1067,7 @@
     const now = new Date();
     let arr = orders.slice();
     if(currentFilter === 'newOrders') arr = arr.filter(o => isPendingAcceptance(o));
+    else if(currentFilter === 'hungerbay') arr = arr.filter(o => isHungerBay(o));
     else if(currentFilter === 'active') arr = arr.filter(o => !isDelivered(o) && !isPendingAcceptance(o) && !isRejected(o));
     else if(currentFilter === 'completed') arr = arr.filter(o => isDelivered(o));
     else if(currentFilter === 'overdue') arr = arr.filter(o => !isDelivered(o) && !isPendingAcceptance(o) && !isRejected(o) && new Date(o.deliveryDateTime) < now);
@@ -1062,7 +1099,7 @@
         <div class="ticket-top">
           <div class="ticket-photo${order.photo ? ' has-photo' : ''}">${order.photo ? '<img src="'+order.photo+'" style="width:100%;height:100%;object-fit:cover;">' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>'}</div>
           <div class="ticket-info">
-            <p class="cust-name">${order.orderNumber ? '<span class="mono" style="background:'+(order.orderType==='custom_request'?'var(--rust)':'var(--gold)')+';color:#fff;padding:1px 7px;border-radius:5px;font-size:11px;margin-right:6px;">'+(order.orderType==='custom_request'?'🎨 ':'#')+escapeHtml(order.orderNumber)+'</span>' : ''}${escapeHtml(order.customerName || 'Walk-in customer')}${order.customerPhone ? ' · <a class="call-link" href="tel:'+escapeHtml(order.customerPhone)+'">'+escapeHtml(order.customerPhone)+'</a>' : ''}</p>
+            <p class="cust-name">${hungerBayLabel(order)} ${order.orderNumber && !isHungerBay(order) ? '<span class="mono" style="background:'+(order.orderType==='custom_request'?'var(--rust)':'var(--gold)')+';color:#fff;padding:1px 7px;border-radius:5px;font-size:11px;margin-right:6px;">'+(order.orderType==='custom_request'?'🎨 ':'#')+escapeHtml(order.orderNumber)+'</span>' : ''}${escapeHtml(order.customerName || 'Walk-in customer')}${order.customerPhone ? ' · <a class="call-link" href="tel:'+escapeHtml(order.customerPhone)+'">'+escapeHtml(order.customerPhone)+'</a>' : ''}</p>
             ${order.orderType === 'custom_request'
               ? (order.price > 0
                   ? '<div style="font-size:11px;color:'+(order.paymentStatus==='deposit_paid_awaiting_confirmation'?'var(--gold)':(order.paymentStatus==='confirmed'?'var(--sage)':'var(--rust)'))+';font-weight:700;margin-bottom:4px;">'+(order.paymentStatus==='deposit_paid_awaiting_confirmation' ? '💰 50% deposit paid — confirm &amp; collect '+rupee(order.price-order.advancePaid)+' at delivery' : (order.paymentStatus==='confirmed' ? '✓ Payment confirmed' : '⏳ Awaiting payment confirmation'))+'</div>'
