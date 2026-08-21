@@ -1,0 +1,3 @@
+Rangpo SEO has been added to the public pages.
+
+Before submitting a sitemap to Google Search Console, set the canonical URL and sitemap URLs to the website's actual public domain (custom domain or Firebase Hosting domain). The project currently does not contain the public domain, so no guessed sitemap URL was added.
