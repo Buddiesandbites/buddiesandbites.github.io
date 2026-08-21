@@ -2,9 +2,6 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://buddiesandbites.github.io/</loc>
-  </url>
-
-  <url>
-    <loc>https://buddiesandbites.github.io/buddies-and-bites-shop.html</loc>
+    <changefreq>weekly</changefreq>
   </url>
 </urlset>
