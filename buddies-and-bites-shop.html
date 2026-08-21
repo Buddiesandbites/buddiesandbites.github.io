@@ -261,9 +261,79 @@
     width:38px; height:38px; border-radius:10px; border:none; background:var(--plum); color:var(--cream);
     display:flex; align-items:center; justify-content:center; cursor:pointer; flex-shrink:0;
   }
+
+  /* ---------- Phone gate ---------- */
+  .phone-gate-backdrop{
+    position:fixed; inset:0; background:rgba(42,33,31,0.72); z-index:100;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .phone-gate-card{
+    background:var(--paper); border-radius:18px; padding:28px 24px; width:100%; max-width:360px;
+    text-align:center; box-shadow:0 20px 50px rgba(0,0,0,0.3);
+  }
+  .phone-gate-card .brand-mark{ margin:0 auto 14px; }
+  .phone-gate-card h2{ font-size:20px; margin:0 0 6px; font-style:italic; }
+  .phone-gate-card .sub{ font-size:12.5px; color:var(--ink-soft); margin-bottom:18px; line-height:1.5; }
+  .phone-gate-card input{
+    width:100%; padding:12px 14px; border-radius:10px; border:1.5px solid var(--line); background:#fff;
+    font-family:'DM Sans',sans-serif; font-size:15px; margin-bottom:10px; color:var(--ink); text-align:center;
+    letter-spacing:.02em;
+  }
+  .phone-gate-card input:focus{ outline:2px solid var(--gold); outline-offset:1px; }
+  .phone-gate-error{ color:var(--rust); font-size:12px; min-height:16px; margin-bottom:8px; }
+  .phone-gate-note{ font-size:10.5px; color:var(--ink-soft); margin-top:10px; line-height:1.4; }
+
+  /* ---------- Review & discount popup ---------- */
+  .review-star-row{ display:flex; gap:8px; justify-content:center; margin-bottom:14px; }
+  .review-star{ font-size:30px; cursor:pointer; color:var(--line); background:none; border:none; padding:0; line-height:1; }
+  .review-star.on{ color:var(--gold); }
+  .review-badge{
+    display:inline-block; background:var(--sage); color:#fff; font-family:'Space Mono',monospace; font-weight:700;
+    font-size:12px; padding:5px 12px; border-radius:999px; margin-bottom:10px;
+  }
+  .review-note{ font-size:11.5px; color:var(--rust); line-height:1.5; margin-top:10px; }
 </style>
 </head>
 <body>
+
+<!-- Phone number gate: shown once per device before browsing -->
+<div class="phone-gate-backdrop" id="phoneGateBackdrop" style="display:none;">
+  <div class="phone-gate-card">
+    <div class="brand-mark" style="display:flex; align-items:center; justify-content:center; font-size:30px;">🎂</div>
+    <h2>Welcome to Buddies and Bites!</h2>
+    <div class="sub">Enter your contact number so we can keep you posted about your orders — and unlock ₹50 off from your 2nd order onward.</div>
+    <input type="tel" id="phoneGateInput" inputmode="tel" placeholder="Your 10-digit mobile number" maxlength="10">
+    <div class="phone-gate-error" id="phoneGateError"></div>
+    <button class="btn btn-primary" id="phoneGateContinueBtn">Continue</button>
+    <div class="phone-gate-note">We'll only use this to confirm your orders and share updates on WhatsApp.</div>
+  </div>
+</div>
+
+<!-- Review & discount popup: shown on 2nd/3rd order at checkout -->
+<div class="sheet-backdrop" id="reviewBackdrop">
+  <div class="sheet" style="position:relative; text-align:center;">
+    <div class="sheet-handle"></div>
+    <div class="review-badge" id="reviewBadge">🎉 ₹50 OFF this order</div>
+    <h2 class="display" style="margin:0 0 8px;">How was your last order?</h2>
+    <p style="font-size:13px; color:var(--ink-soft); line-height:1.55; margin:0 0 4px;" id="reviewPrevOrderLine"></p>
+    <p style="font-size:13px; color:var(--ink-soft); line-height:1.55; margin:0 0 16px;">
+      Leave a quick review of your <strong>previous order</strong> and we'll knock <strong>₹50 off</strong> this new order automatically — no coupon needed.
+    </p>
+    <div class="review-star-row" id="reviewStarRow">
+      <button type="button" class="review-star" data-star="1">★</button>
+      <button type="button" class="review-star" data-star="2">★</button>
+      <button type="button" class="review-star" data-star="3">★</button>
+      <button type="button" class="review-star" data-star="4">★</button>
+      <button type="button" class="review-star" data-star="5">★</button>
+    </div>
+    <div class="field" style="text-align:left;">
+      <textarea id="reviewTextInput" placeholder="Tell us about your last order — what you loved, what we can improve…" style="width:100%; min-height:80px; padding:10px 12px; border-radius:9px; border:1.5px solid var(--line); background:#fff; font-family:'DM Sans',sans-serif; font-size:14px; resize:vertical;"></textarea>
+    </div>
+    <button class="btn btn-primary" id="reviewSubmitBtn" style="margin-bottom:10px;">Submit review &amp; get ₹50 off</button>
+    <button class="btn btn-ghost" id="reviewIgnoreBtn">Ignore &amp; continue without discount</button>
+    <div class="review-note">If you skip the review, this order won't be eligible for the ₹50 discount.</div>
+  </div>
+</div>
 
 <header class="top">
   <div class="offer-sticker"><span class="rakhi-emoji">🪢</span><span>Rakhi Special</span><span>₹50 OFF</span></div>
@@ -603,6 +673,8 @@
   const counterRef = db.collection('meta').doc('orderCounter');
   const customCounterRef = db.collection('meta').doc('customRequestCounter');
   const categoryStatusDoc = db.collection('meta').doc('categoryStatus');
+  const customersCol = db.collection('customers');
+  const reviewsCol = db.collection('reviews');
 
   // ---------- Visit tracking (once per device per day) ----------
   (function trackVisit(){
@@ -619,6 +691,62 @@
       ).catch(e => console.error('visit total tracking error', e));
     }catch(e){ console.error('visit tracking error', e); }
   })();
+
+  // ---------- Known customer phone number (asked once per device) ----------
+  const KNOWN_PHONE_KEY = 'bnb_known_phone';
+  let knownPhone = (localStorage.getItem(KNOWN_PHONE_KEY) || '').trim();
+
+  function normalizePhone(p){
+    const digits = (p || '').replace(/\D/g, '');
+    return digits.slice(-10);
+  }
+
+  (function showPhoneGateIfNeeded(){
+    if(knownPhone && normalizePhone(knownPhone).length === 10) return;
+    const backdrop = $('phoneGateBackdrop');
+    const input = $('phoneGateInput');
+    const err = $('phoneGateError');
+    backdrop.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+    function tryContinue(){
+      const val = normalizePhone(input.value);
+      if(val.length !== 10){ err.textContent = 'Please enter a valid 10-digit mobile number'; return; }
+      knownPhone = val;
+      localStorage.setItem(KNOWN_PHONE_KEY, val);
+      backdrop.style.display = 'none';
+      document.body.style.overflow = '';
+    }
+    $('phoneGateContinueBtn').addEventListener('click', tryContinue);
+    input.addEventListener('keydown', (e) => { if(e.key === 'Enter') tryContinue(); });
+    input.addEventListener('input', () => { input.value = input.value.replace(/\D/g, '').slice(0,10); });
+  })();
+
+  // ---------- Repeat-customer tracking & auto review discount ----------
+  async function getCustomerRecord(phone){
+    const key = normalizePhone(phone);
+    if(key.length !== 10) return { totalOrders: 0, reviewsGiven: {} };
+    try{
+      const doc = await customersCol.doc(key).get();
+      return doc.exists ? Object.assign({ totalOrders: 0, reviewsGiven: {} }, doc.data()) : { totalOrders: 0, reviewsGiven: {} };
+    }catch(e){ console.error('Could not load customer record', e); return { totalOrders: 0, reviewsGiven: {} }; }
+  }
+  async function recordCustomerOrder(phone, reviewGivenForThisOrder, tierReviewed, orderSummary){
+    const key = normalizePhone(phone);
+    if(key.length !== 10) return;
+    try{
+      await db.runTransaction(async (t) => {
+        const ref = customersCol.doc(key);
+        const doc = await t.get(ref);
+        const current = doc.exists ? (doc.data().totalOrders || 0) : 0;
+        const reviewsGiven = doc.exists ? (doc.data().reviewsGiven || {}) : {};
+        if(reviewGivenForThisOrder && tierReviewed){ reviewsGiven[tierReviewed] = true; }
+        t.set(ref, {
+          totalOrders: current + 1, phone: key, lastOrderAt: new Date().toISOString(),
+          lastOrderSummary: orderSummary || null, reviewsGiven
+        }, { merge: true });
+      });
+    }catch(e){ console.error('Could not record customer order', e); }
+  }
 
   let products = [];
   let rawActiveProducts = [];
@@ -821,7 +949,7 @@ Instructions:
     $('customPhotoChangeHint').style.display = 'none';
     $('customDescInput').value = '';
     $('customNameInput').value = '';
-    $('customPhoneInput').value = '';
+    $('customPhoneInput').value = knownPhone || '';
     $('customAddressInput').value = '';
     $('customDeliveryDateInput').value = todayStr();
     $('customDeliveryTimeInput').value = '';
@@ -1153,6 +1281,7 @@ Instructions:
     };
     $('detailBackdrop').classList.remove('open');
     $('deliveryDateInput').value = todayStr();
+    if(knownPhone && !$('custPhoneInput').value.trim()) $('custPhoneInput').value = knownPhone;
     renderSummary();
     $('checkoutBackdrop').classList.add('open');
   });
@@ -1178,7 +1307,7 @@ Instructions:
   $('checkoutClose').addEventListener('click', () => $('checkoutBackdrop').classList.remove('open'));
   $('checkoutBackdrop').addEventListener('click', (e) => { if(e.target.id === 'checkoutBackdrop') $('checkoutBackdrop').classList.remove('open'); });
 
-  $('continueToPaymentBtn').addEventListener('click', () => {
+  $('continueToPaymentBtn').addEventListener('click', async () => {
     const name = $('custNameInput').value.trim();
     const phone = $('custPhoneInput').value.trim();
     const address = $('custAddressInput').value.trim();
@@ -1200,19 +1329,129 @@ Instructions:
     orderDraft.customerAddress = address;
     orderDraft.deliveryArea = deliveryArea;
     orderDraft.deliveryDateTime = dDate + 'T' + dTime + ':00';
+    orderDraft.discount = 0;
+    orderDraft.reviewGiven = false;
+    orderDraft.reviewDiscountTier = null;
+
+    const btn = $('continueToPaymentBtn'); btn.disabled = true;
+    let nextOrderNumber = 1;
+    let alreadyReviewedThisTier = false;
+    let lastOrderSummary = '';
+    let lastOrderAt = '';
+    try{
+      const customerRec = await getCustomerRecord(phone);
+      nextOrderNumber = (customerRec.totalOrders || 0) + 1;
+      alreadyReviewedThisTier = !!(customerRec.reviewsGiven && customerRec.reviewsGiven[nextOrderNumber]);
+      lastOrderSummary = customerRec.lastOrderSummary || '';
+      lastOrderAt = customerRec.lastOrderAt || '';
+    }catch(e){ console.error(e); }
+    btn.disabled = false;
+    orderDraft.nextOrderNumber = nextOrderNumber;
+
+    if(reviewChoiceCache[nextOrderNumber]){
+      orderDraft.discount = reviewChoiceCache[nextOrderNumber].discount;
+      orderDraft.reviewGiven = reviewChoiceCache[nextOrderNumber].reviewGiven;
+      orderDraft.reviewDiscountTier = reviewChoiceCache[nextOrderNumber].reviewGiven ? nextOrderNumber : null;
+      proceedToPaymentScreen();
+      return;
+    }
+
+    if((nextOrderNumber === 2 || nextOrderNumber === 3) && !alreadyReviewedThisTier){
+      $('checkoutBackdrop').classList.remove('open');
+      openReviewPrompt(nextOrderNumber, lastOrderSummary, lastOrderAt);
+      return;
+    }
+    proceedToPaymentScreen();
+  });
+
+  function openReviewPrompt(tier, lastOrderSummary, lastOrderAt){
+    $('reviewBadge').textContent = '🎉 ₹50 OFF this order';
+    $('reviewTextInput').value = '';
+    selectedReviewStars = 5;
+    renderReviewStars();
+    const prevLine = $('reviewPrevOrderLine');
+    if(lastOrderSummary){
+      let dateTxt = '';
+      if(lastOrderAt){
+        const d = new Date(lastOrderAt);
+        if(!isNaN(d)) dateTxt = ' on ' + d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+      }
+      prevLine.textContent = 'We mean your last order — ' + lastOrderSummary + dateTxt + '.';
+      prevLine.style.display = 'block';
+    } else {
+      prevLine.textContent = '';
+      prevLine.style.display = 'none';
+    }
+    $('reviewBackdrop').classList.add('open');
+  }
+
+  let selectedReviewStars = 5;
+  let reviewChoiceCache = {}; // orderTier -> { discount, reviewGiven }
+  function renderReviewStars(){
+    document.querySelectorAll('#reviewStarRow .review-star').forEach(btn => {
+      const star = parseInt(btn.dataset.star, 10);
+      btn.classList.toggle('on', star <= selectedReviewStars);
+    });
+  }
+  document.querySelectorAll('#reviewStarRow .review-star').forEach(btn => {
+    btn.addEventListener('click', () => {
+      selectedReviewStars = parseInt(btn.dataset.star, 10);
+      renderReviewStars();
+    });
+  });
+
+  $('reviewIgnoreBtn').addEventListener('click', () => {
+    reviewChoiceCache[orderDraft.nextOrderNumber] = { discount: 0, reviewGiven: false };
+    $('reviewBackdrop').classList.remove('open');
+    proceedToPaymentScreen();
+  });
+
+  $('reviewSubmitBtn').addEventListener('click', async () => {
+    const text = $('reviewTextInput').value.trim();
+    if(!text){ toast('Please write a short review, or tap Ignore instead'); return; }
+    const submitBtn = $('reviewSubmitBtn'); submitBtn.disabled = true;
+    try{
+      await reviewsCol.add({
+        phone: normalizePhone(orderDraft.customerPhone),
+        customerName: orderDraft.customerName,
+        stars: selectedReviewStars,
+        text,
+        aboutOrder: $('reviewPrevOrderLine').textContent || null,
+        orderTier: orderDraft.nextOrderNumber,
+        createdAt: new Date().toISOString()
+      });
+      orderDraft.discount = 50;
+      orderDraft.reviewGiven = true;
+      orderDraft.reviewDiscountTier = orderDraft.nextOrderNumber;
+      reviewChoiceCache[orderDraft.nextOrderNumber] = { discount: 50, reviewGiven: true };
+      toast('Thank you for the review — ₹50 off applied! 🎉');
+      $('reviewBackdrop').classList.remove('open');
+      proceedToPaymentScreen();
+    }catch(e){
+      console.error(e);
+      toast('Could not save your review — please try again');
+    }
+    submitBtn.disabled = false;
+  });
+
+  function proceedToPaymentScreen(){
+    const discount = orderDraft.discount || 0;
+    const payableTotal = Math.max(0, orderDraft.total - discount);
+    orderDraft.payableTotal = payableTotal;
 
     const qrBox = $('qrBox');
     const amountNote = orderDraft.deliveryCharge !== null
       ? '<div style="font-size:11px;color:var(--ink-soft);margin-top:2px;">(incl. '+rupee(orderDraft.deliveryCharge)+' delivery to '+escapeHtml(orderDraft.deliveryArea)+')</div>'
       : '<div style="font-size:11px;color:var(--rust);margin-top:2px;">+ delivery charge for '+escapeHtml(orderDraft.deliveryArea)+' (we\'ll confirm this)</div>';
+    const discountNote = discount > 0 ? '<div style="font-size:12px;color:var(--sage);font-weight:700;margin-top:4px;">🎉 ₹50 review discount applied</div>' : '';
     if(shopConfig.qrImage){
-      qrBox.innerHTML = `<img src="${shopConfig.qrImage}"><div class="amount">${rupee(orderDraft.total)}</div>${amountNote}${shopConfig.upiId ? '<div class="upi-id" style="margin-top:8px;">'+escapeHtml(shopConfig.upiId)+'</div>' : ''}`;
+      qrBox.innerHTML = `<img src="${shopConfig.qrImage}"><div class="amount">${rupee(payableTotal)}</div>${discountNote}${amountNote}${shopConfig.upiId ? '<div class="upi-id" style="margin-top:8px;">'+escapeHtml(shopConfig.upiId)+'</div>' : ''}`;
     } else {
-      qrBox.innerHTML = `<div class="amount">${rupee(orderDraft.total)}</div>${amountNote}<div class="upi-id" style="margin-top:8px;">${shopConfig.upiId ? escapeHtml(shopConfig.upiId) : 'Please contact us for payment details'}</div>`;
+      qrBox.innerHTML = `<div class="amount">${rupee(payableTotal)}</div>${discountNote}${amountNote}<div class="upi-id" style="margin-top:8px;">${shopConfig.upiId ? escapeHtml(shopConfig.upiId) : 'Please contact us for payment details'}</div>`;
     }
     $('checkoutBackdrop').classList.remove('open');
     $('paymentBackdrop').classList.add('open');
-  });
+  }
 
   $('paymentClose').addEventListener('click', () => $('paymentBackdrop').classList.remove('open'));
   $('backToCheckoutBtn').addEventListener('click', () => {
@@ -1267,6 +1506,7 @@ Instructions:
           createdAt: new Date().toISOString()
         };
         await ordersCol.doc(uid()).set(order);
+        recordCustomerOrder(d.customerPhone, false, null, 'Custom cake request');
         $('paymentBackdrop').classList.remove('open');
         $('successTitle').textContent = 'Payment received!';
         $('successSubtitle').textContent = 'Your reference number is';
@@ -1303,7 +1543,9 @@ Instructions:
         cakeSubtotal: orderDraft.subtotal,
         deliveryArea: orderDraft.deliveryArea,
         deliveryCharge: orderDraft.deliveryCharge,
-        price: orderDraft.total,
+        price: orderDraft.payableTotal != null ? orderDraft.payableTotal : orderDraft.total,
+        discount: orderDraft.discount || 0,
+        reviewGiven: !!orderDraft.reviewGiven,
         advancePaid: 0,
         orderDate: todayStr(),
         deliveryDateTime: orderDraft.deliveryDateTime,
@@ -1313,11 +1555,15 @@ Instructions:
       };
       const id = uid();
       await ordersCol.doc(id).set(order);
+      recordCustomerOrder(orderDraft.customerPhone, orderDraft.reviewGiven, orderDraft.reviewDiscountTier,
+        orderDraft.productName + ' (' + orderDraft.sizeLabel + ')');
       $('paymentBackdrop').classList.remove('open');
       $('successTitle').textContent = 'Order placed!';
       $('successSubtitle').textContent = 'Your order number is';
       $('orderNumDisplay').textContent = '#' + orderNumber;
-      $('successNote').textContent = "We'll confirm your order as soon as we verify your payment. Keep this number for reference.";
+      $('successNote').textContent = orderDraft.discount > 0
+        ? "₹50 review discount applied! We'll confirm your order as soon as we verify your payment. Keep this number for reference."
+        : "We'll confirm your order as soon as we verify your payment. Keep this number for reference.";
       $('successBackdrop').classList.add('open');
     }catch(e){
       console.error(e);

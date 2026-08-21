@@ -72,6 +72,18 @@
     font-size:13px; font-weight:700; cursor:pointer; width:100%; margin-top:2px;
   }
 
+  .flavour-chip{
+    display:inline-flex; align-items:center; gap:6px; background:var(--cream); border:1.5px solid var(--line);
+    color:var(--plum); font-size:12.5px; font-weight:700; padding:5px 6px 5px 12px; border-radius:999px;
+  }
+  .flavour-chip button{
+    width:18px; height:18px; border-radius:50%; border:none; background:rgba(87,37,22,.12); color:var(--plum);
+    font-size:13px; line-height:1; cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0;
+  }
+  .flavour-add-row{ display:flex; gap:8px; }
+  .flavour-add-row input{ flex:1; }
+  .flavour-add-row button{ padding:0 16px; border-radius:9px; white-space:nowrap; }
+
   .btn{ padding:12px; border-radius:10px; border:none; font-weight:700; font-size:14.5px; cursor:pointer; font-family:'DM Sans',sans-serif; }
   .btn-primary{ background:var(--plum); color:var(--cream); width:100%; }
   .btn-ghost{ background:transparent; color:var(--ink-soft); border:1.5px solid var(--line); }
@@ -83,6 +95,14 @@
     display:flex; gap:12px; padding:12px; border:1px solid var(--line); border-radius:12px; margin-bottom:10px; background:#fff;
   }
   .product-item.inactive{ opacity:.5; }
+
+  .cat-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:10px 12px; border:1px solid var(--line); border-radius:10px; margin-bottom:8px; background:#fff;
+  }
+  .cat-row.cat-disabled{ opacity:.55; }
+  .cat-row .cat-name{ font-weight:700; font-size:14px; }
+  .cat-row .cat-hint{ font-size:11px; color:var(--rust); margin-top:2px; }
   .product-item img{ width:64px; height:64px; border-radius:9px; object-fit:cover; flex-shrink:0; background:var(--cream); }
   .product-item .no-img{ width:64px; height:64px; border-radius:9px; background:var(--cream); flex-shrink:0; display:flex; align-items:center; justify-content:center; color:var(--ink-soft); }
   .product-item .info{ flex:1; min-width:0; }
@@ -222,6 +242,16 @@
       <div class="hint">MRP is the struck-through price, Sale price is what the customer actually pays.</div>
     </div>
 
+    <div class="field">
+      <label>Flavour options (optional)</label>
+      <div id="flavourChips" style="display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;"></div>
+      <div class="flavour-add-row">
+        <input type="text" id="flavourNameInput" placeholder="e.g. Chocolate, Red Velvet, Vanilla">
+        <button class="btn btn-ghost" id="addFlavourBtn" type="button">+ Add</button>
+      </div>
+      <div class="hint">If you add flavours here, customers ordering this cake will see an optional dropdown so they can pick a flavour for the same design — leave empty if this cake only comes in one flavour.</div>
+    </div>
+
     <div class="btn-row">
       <button class="btn btn-ghost" id="cancelEditBtn" style="display:none;">Cancel edit</button>
       <button class="btn btn-primary" id="saveProductBtn">Save cake</button>
@@ -242,6 +272,12 @@
     <div class="hint">
       Free keys from <strong>aistudio.google.com</strong> → "Get API key". The shop chatbot key is used on your public customer page, so anyone visiting could technically see it in their browser's network traffic — using a <em>separate</em> key here (instead of reusing the same one as above) limits the damage if it's ever misused, since you can regenerate just that one without affecting product suggestions.
     </div>
+  </div>
+
+  <div class="card">
+    <h2>Categories</h2>
+    <div class="hint" style="margin-bottom:10px;">Turn a category off to hide every cake in it from the shop, without touching individual cakes.</div>
+    <div id="categoryList"></div>
   </div>
 
   <div class="card">
@@ -282,12 +318,15 @@
   const db = firebase.firestore();
   const productsCol = db.collection('products');
   const geminiConfigDoc = db.collection('meta').doc('geminiConfig');
+  const categoryStatusDoc = db.collection('meta').doc('categoryStatus');
 
   let products = [];
+  let categoryStatus = {};
   let editingId = null;
   let pendingPhoto = null;
   let pendingQr = null;
   let geminiApiKey = '';
+  let pendingFlavours = [];
 
   // ---------- Image compression ----------
   function compressImage(file, maxW, quality){
@@ -348,6 +387,44 @@
   }
   $('addSizeBtn').addEventListener('click', () => addSizeRow());
 
+  // ---------- Flavour options ----------
+  const flavourChipsWrap = $('flavourChips');
+  function renderFlavourChips(){
+    flavourChipsWrap.innerHTML = '';
+    if(pendingFlavours.length === 0){
+      flavourChipsWrap.innerHTML = '<span class="hint" style="margin:0;">No flavour options added yet.</span>';
+      return;
+    }
+    pendingFlavours.forEach((f, idx) => {
+      const chip = document.createElement('span');
+      chip.className = 'flavour-chip';
+      chip.innerHTML = `${escapeHtml(f)} <button type="button" title="Remove">×</button>`;
+      chip.querySelector('button').addEventListener('click', () => {
+        pendingFlavours.splice(idx, 1);
+        renderFlavourChips();
+      });
+      flavourChipsWrap.appendChild(chip);
+    });
+  }
+  function addFlavourFromInput(){
+    const input = $('flavourNameInput');
+    const val = input.value.trim();
+    if(!val) return;
+    if(pendingFlavours.some(f => f.toLowerCase() === val.toLowerCase())){
+      toast('That flavour is already added');
+      input.value = ''; input.focus();
+      return;
+    }
+    pendingFlavours.push(val);
+    input.value = '';
+    input.focus();
+    renderFlavourChips();
+  }
+  $('addFlavourBtn').addEventListener('click', addFlavourFromInput);
+  $('flavourNameInput').addEventListener('keydown', (e) => {
+    if(e.key === 'Enter'){ e.preventDefault(); addFlavourFromInput(); }
+  });
+
   function readSizeRows(){
     return Array.from(sizeRows.querySelectorAll('.size-row')).map(row => {
       const label = row.querySelector('.size-label').value.trim();
@@ -366,6 +443,7 @@
     photoLabel.style.display = 'block'; photoChangeHint.style.display = 'none';
     photoInput.value = '';
     sizeRows.innerHTML = ''; addSizeRow();
+    pendingFlavours = []; renderFlavourChips();
     $('cancelEditBtn').style.display = 'none';
   }
   resetForm();
@@ -378,6 +456,7 @@
     const category = $('categoryInput').value.trim() || 'Uncategorised';
     const specs = $('specsInput').value.trim();
     const sizes = readSizeRows();
+    const flavours = pendingFlavours.slice();
     if(!name){ toast('Add a cake name'); return; }
     if(sizes.length === 0){ toast('Add at least one size with a price'); return; }
 
@@ -386,7 +465,7 @@
       if(editingId){
         const existing = products.find(p => p.id === editingId);
         const data = {
-          name, category, specs, sizes,
+          name, category, specs, sizes, flavours,
           photo: pendingPhoto !== null ? pendingPhoto : (existing ? existing.photo || null : null),
           photoThumb: pendingPhotoThumb !== null ? pendingPhotoThumb : (existing ? existing.photoThumb || existing.photo || null : null),
           active: existing ? (existing.active !== false) : true,
@@ -397,7 +476,7 @@
       } else {
         const id = uid();
         await productsCol.doc(id).set({
-          name, category, specs, sizes, photo: pendingPhoto, photoThumb: pendingPhotoThumb, active: true,
+          name, category, specs, sizes, flavours, photo: pendingPhoto, photoThumb: pendingPhotoThumb, active: true,
           createdAt: new Date().toISOString()
         });
         toast('Cake added');
@@ -427,6 +506,8 @@
     sizeRows.innerHTML = '';
     (p.sizes || []).forEach(s => addSizeRow(s.label, s.mrp, s.sale));
     if((p.sizes || []).length === 0) addSizeRow();
+    pendingFlavours = (p.flavours || []).slice();
+    renderFlavourChips();
     $('cancelEditBtn').style.display = 'block';
     window.scrollTo({top:0, behavior:'smooth'});
   }
@@ -466,6 +547,7 @@
           <h4>${escapeHtml(p.name)}</h4>
           ${p.category ? '<div style="font-size:10.5px;color:var(--gold);font-weight:700;text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px;">'+escapeHtml(p.category)+'</div>' : ''}
           <div class="sizes">${escapeHtml(sizesTxt)}</div>
+          ${(p.flavours && p.flavours.length) ? '<div class="hint" style="margin-top:2px;">🍰 '+p.flavours.length+' flavour option'+(p.flavours.length>1?'s':'')+'</div>' : ''}
           ${p.active === false ? '<div class="hint" style="color:var(--rust);">Hidden from shop</div>' : ''}
         </div>
         <div class="actions">
@@ -492,7 +574,51 @@
     products = snap.docs.map(d => ({ ...d.data(), id: d.id }));
     products.sort((a,b) => (a.category||'').localeCompare(b.category||'') || (a.name||'').localeCompare(b.name||''));
     renderProducts();
+    renderCategories();
   }, err => { console.error(err); toast('Could not sync products'); });
+
+  categoryStatusDoc.onSnapshot(doc => {
+    categoryStatus = doc.exists ? (doc.data() || {}) : {};
+    renderCategories();
+  }, err => { console.error(err); });
+
+  // ---------- Category enable/disable ----------
+  async function toggleCategory(cat){
+    if(isReadOnly) return;
+    const isDisabled = categoryStatus[cat] === false;
+    try{
+      await categoryStatusDoc.set({ [cat]: isDisabled ? true : false }, { merge: true });
+    }catch(e){ toast('Could not update category'); }
+  }
+
+  function renderCategories(){
+    const list = $('categoryList');
+    if(!list) return;
+    const cats = Array.from(new Set(products.map(p => p.category || 'Uncategorised'))).sort((a,b) => a.localeCompare(b));
+    if(cats.length === 0){
+      list.innerHTML = '<div class="hint">Categories will appear here once you add cakes.</div>';
+      return;
+    }
+    list.innerHTML = '';
+    cats.forEach(cat => {
+      const isOff = categoryStatus[cat] === false;
+      const count = products.filter(p => (p.category || 'Uncategorised') === cat).length;
+      const row = document.createElement('div');
+      row.className = 'cat-row' + (isOff ? ' cat-disabled' : '');
+      row.innerHTML = `
+        <div>
+          <div class="cat-name">${escapeHtml(cat)} <span class="mono" style="font-size:11px;color:var(--ink-soft);">(${count})</span></div>
+          ${isOff ? '<div class="cat-hint">Hidden from shop</div>' : ''}
+        </div>
+        <label class="switch">
+          <input type="checkbox" class="cat-toggle" ${isOff ? '' : 'checked'}>
+          <span class="slider"></span>
+        </label>
+      `;
+      row.querySelector('.cat-toggle').addEventListener('change', () => toggleCategory(cat));
+      list.appendChild(row);
+    });
+  }
 
   // ---------- AI (Gemini) product suggestions ----------
   geminiConfigDoc.get().then(doc => {
@@ -690,56 +816,5 @@
 
 })();
 </script>
-
-<script>
-(function(){
-  try{
-    var isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
-    if(isStandalone) return;
-
-    var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
-    var deferredPrompt = null;
-
-    window.addEventListener('beforeinstallprompt', function(e){
-      e.preventDefault();
-      deferredPrompt = e;
-    });
-
-    function buildInstallBanner(){
-      if(document.getElementById('bnbInstallBanner')) return;
-      var banner = document.createElement('div');
-      banner.id = 'bnbInstallBanner';
-      banner.style.cssText = 'position:fixed;left:12px;right:12px;bottom:14px;z-index:99999;background:#572516;color:#F7F1E4;border-radius:14px;padding:13px 14px;box-shadow:0 10px 30px rgba(0,0,0,0.35);display:flex;align-items:center;gap:10px;font-family:"DM Sans",sans-serif;border:1.5px solid #C6952F;max-width:420px;margin:0 auto;';
-      banner.innerHTML =
-        '<div style="flex:1;font-size:12.5px;line-height:1.4;">' +
-          '<strong style="display:block;margin-bottom:2px;font-size:13.5px;">Install this app</strong>' +
-          '<span id="bnbInstallText">' + (isIOS ? 'Tap the Share icon below, then "Add to Home Screen".' : 'Add to your home screen for quick, full-screen access.') + '</span>' +
-        '</div>' +
-        (isIOS ? '' : '<button id="bnbInstallBtn" style="background:#C6952F;color:#2A211F;border:none;padding:9px 13px;border-radius:9px;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;">Install</button>') +
-        '<button id="bnbInstallClose" style="background:none;border:none;color:#F7F1E4;font-size:20px;cursor:pointer;padding:0 4px;line-height:1;">×</button>';
-      document.body.appendChild(banner);
-
-      document.getElementById('bnbInstallClose').addEventListener('click', function(){ banner.remove(); });
-
-      var btn = document.getElementById('bnbInstallBtn');
-      if(btn){
-        btn.addEventListener('click', function(){
-          if(deferredPrompt){
-            deferredPrompt.prompt();
-            deferredPrompt.userChoice.then(function(){ deferredPrompt = null; banner.remove(); });
-          } else {
-            document.getElementById('bnbInstallText').textContent = 'Open your browser menu (⋮) and tap "Install app" or "Add to Home screen".';
-          }
-        });
-      }
-    }
-
-    window.addEventListener('load', function(){
-      setTimeout(buildInstallBanner, 900);
-    });
-  }catch(e){ console.error('install banner error', e); }
-})();
-</script>
-
 </body>
 </html>
