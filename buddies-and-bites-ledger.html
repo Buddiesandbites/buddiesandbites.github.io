@@ -121,20 +121,6 @@
     display:flex; align-items:center; justify-content:center; color:var(--ink-soft);
     border-right:1px solid var(--line);
   }
-  .ticket-photo.has-photo{ cursor:zoom-in; }
-
-  /* ---------- Photo lightbox ---------- */
-  .photo-lightbox{
-    position:fixed; inset:0; background:rgba(20,14,12,0.92); z-index:80;
-    display:none; align-items:center; justify-content:center; padding:20px;
-  }
-  .photo-lightbox.open{ display:flex; }
-  .photo-lightbox img{ max-width:100%; max-height:100%; border-radius:10px; box-shadow:0 10px 40px rgba(0,0,0,0.5); }
-  .photo-lightbox-close{
-    position:absolute; top:16px; right:16px; width:40px; height:40px; border-radius:50%;
-    background:rgba(255,255,255,0.12); border:1.5px solid rgba(255,255,255,0.35); color:#fff;
-    display:flex; align-items:center; justify-content:center; cursor:pointer; font-size:20px;
-  }
   .ticket-photo svg{ width:30px; height:30px; opacity:.35; }
   .ticket-info{ flex:1; padding:12px 12px 10px 14px; min-width:0; }
   .ticket-info .desc{ font-family:'Fraunces', serif; font-size:16.5px; font-weight:600; line-height:1.25; margin:0 0 4px; word-break:break-word;}
@@ -171,7 +157,6 @@
     font-size:12.5px; margin-top:4px; padding:8px 10px; border-radius:8px; background:var(--paper);
     border:1px solid var(--line); font-family:'Space Mono',monospace;
   }
-  .hint{ font-size:11.5px; color:var(--ink-soft); line-height:1.5; }
 
   .perforation{
     height:14px; margin:0 6px;
@@ -444,8 +429,6 @@
       <button class="btn btn-ghost" id="cancelBtn">Cancel</button>
       <button class="btn btn-primary" id="saveBtn">Save ticket</button>
     </div>
-    <button class="btn btn-primary" id="paymentApprovedBtn" style="display:none; width:100%; margin-top:10px; background:var(--sage);">💰 Payment approved — send confirmation</button>
-    <div class="hint" id="paymentApprovedHint" style="display:none; text-align:center; margin-top:6px;">For custom cakes: once you and the customer have agreed on a price above and payment is done, tap this to confirm the order and notify them on WhatsApp.</div>
     <button class="btn btn-danger" id="deleteBtn" style="display:none; width:100%; margin-top:10px;">Delete this order</button>
   </div>
 </div>
@@ -468,11 +451,6 @@
 </div><!-- /appRoot -->
 
 <div class="toast" id="toast"></div>
-
-<div class="photo-lightbox" id="photoLightbox">
-  <button class="photo-lightbox-close" id="photoLightboxClose">✕</button>
-  <img id="photoLightboxImg" src="" alt="Cake photo">
-</div>
 
 <script>
 (function(){
@@ -529,58 +507,6 @@
     if(!order.customerPhone) return;
     const message = `Hi ${order.customerName || ''}, we're really sorry — Buddies and Bites is unable to accept your order${order.orderNumber ? ' #' + order.orderNumber : ''}.\n\nReason: ${reason}\n\nFeel free to reach out to us if you have any questions. 🙏`;
     window.open(waLink(order.customerPhone, message), '_blank');
-  }
-  function upiPayLink(amount, note){
-    if(!shopConfigCache.upiId) return null;
-    const params = new URLSearchParams({
-      pa: shopConfigCache.upiId, pn: 'Buddies and Bites', am: String(amount), cu: 'INR', tn: note || 'Order payment'
-    });
-    return 'upi://pay?' + params.toString();
-  }
-  function sendWhatsAppPaymentReminder(order){
-    if(!order.customerPhone){ toast('No contact number on this order'); return; }
-    const amountDue = order.price || 0;
-    const upiLink = amountDue > 0 ? upiPayLink(amountDue, 'BnB Order ' + (order.orderNumber || '')) : null;
-    const message = `Hi ${order.customerName || ''}! 🎂 This is a reminder from Buddies and Bites about your order${order.orderNumber ? ' #' + order.orderNumber : ''}.\n\n`
-      + `We haven't received your payment yet${amountDue ? ' of ' + rupee(amountDue) : ''}. Please pay to confirm your order — if you don't pay soon, we may need to release this slot.`
-      + (upiLink ? `\n\nPay directly here (opens your UPI app):\n${upiLink}` : (shopConfigCache.upiId ? `\n\nUPI ID: ${shopConfigCache.upiId}` : ''))
-      + `\n\nAlready paid? Please ignore this — we'll confirm shortly. 🙏`;
-    window.open(waLink(order.customerPhone, message), '_blank');
-  }
-  function sendWhatsAppPaymentApproved(order){
-    if(!order.customerPhone) return;
-    const remaining = (order.price || 0) - (order.advancePaid || 0);
-    const message = `Hi ${order.customerName || ''}! 🎂✅ Payment received — your custom cake order${order.orderNumber ? ' #' + order.orderNumber : ''} with Buddies and Bites is now *confirmed*!\n\n`
-      + `Price: ${rupee(order.price)}\nPaid: ${rupee(order.advancePaid)}`
-      + (remaining > 0 ? `\nRemaining: ${rupee(remaining)} due at delivery` : '')
-      + `\nDelivery: ${fmtDate(order.deliveryDateTime)}, ${fmtTime(order.deliveryDateTime)}\n\nThank you for choosing Buddies and Bites! 💛`;
-    window.open(waLink(order.customerPhone, message), '_blank');
-  }
-  // ---------- Reject lock (5 minutes after a payment reminder is sent) ----------
-  const REJECT_LOCK_MS = 5 * 60 * 1000;
-  function rejectLockInfo(order){
-    if(!order.paymentReminderSentAt || order.paymentStatus === 'confirmed') return { locked: false };
-    const sentAt = new Date(order.paymentReminderSentAt).getTime();
-    const remaining = sentAt + REJECT_LOCK_MS - Date.now();
-    if(!(remaining > 0)) return { locked: false };
-    const mins = Math.floor(remaining / 60000);
-    const secs = Math.floor((remaining % 60000) / 1000);
-    return { locked: true, label: mins + ':' + String(secs).padStart(2, '0') };
-  }
-  let rejectUnlockTimeout = null;
-  function scheduleRejectUnlockCheck(){
-    if(rejectUnlockTimeout){ clearTimeout(rejectUnlockTimeout); rejectUnlockTimeout = null; }
-    const now = Date.now();
-    let minRemaining = Infinity;
-    orders.forEach(o => {
-      if(isPendingAcceptance(o) && o.paymentReminderSentAt && o.paymentStatus !== 'confirmed'){
-        const remaining = new Date(o.paymentReminderSentAt).getTime() + REJECT_LOCK_MS - now;
-        if(remaining > 0 && remaining < minRemaining) minRemaining = remaining;
-      }
-    });
-    if(minRemaining !== Infinity){
-      rejectUnlockTimeout = setTimeout(() => { render(); }, Math.min(minRemaining + 500, 2147483647));
-    }
   }
 
   // ---------- Reject reason sheet ----------
@@ -640,10 +566,6 @@
   firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
   const ordersCollection = db.collection('orders');
-  let shopConfigCache = {};
-  db.collection('meta').doc('shopConfig').get()
-    .then(doc => { if(doc.exists) shopConfigCache = doc.data() || {}; })
-    .catch(e => console.error('Could not load shop config', e));
   let unsubscribeOrders = null;
   let initialOrdersSnapshotDone = false;
   let lastSyncedAt = null;
@@ -804,9 +726,6 @@
       photoLabel.style.display = 'block'; photoChangeHint.style.display = 'none';
     }
     deleteBtn.style.display = order ? 'block' : 'none';
-    const showPaymentApproved = !!(order && order.orderType === 'custom_request' && order.paymentStatus !== 'confirmed');
-    $('paymentApprovedBtn').style.display = showPaymentApproved ? 'block' : 'none';
-    $('paymentApprovedHint').style.display = showPaymentApproved ? 'block' : 'none';
     sheetBackdrop.classList.add('open');
   }
   function closeSheet(){
@@ -883,46 +802,6 @@
       toast((e && e.message) ? e.message : 'Could not save — try again');
     }
     saveBtn.disabled = false;
-  });
-
-  $('paymentApprovedBtn').addEventListener('click', async () => {
-    if(isReadOnly) return;
-    if(!editingId) return;
-    const order = orders.find(o => o.id === editingId);
-    if(!order) return;
-    const price = parseFloat(priceInput.value) || 0;
-    if(price <= 0){ toast('Enter the final price first'); return; }
-    const phone = custPhoneInput.value.trim() || order.customerPhone;
-    if(!phone){ toast('Add a contact number so we can send the confirmation'); return; }
-    let advancePaid = parseFloat(advanceInput.value) || 0;
-    if(advancePaid <= 0) advancePaid = price; // this button confirms payment is done, so assume full payment unless a partial amount was entered
-
-    order.customerName = custNameInput.value.trim() || order.customerName;
-    order.staffName = staffNameInput.value.trim();
-    order.customerPhone = phone;
-    order.customerAddress = custAddressInput.value.trim();
-    order.flavour = flavourInput.value.trim();
-    order.description = descInput.value.trim();
-    order.quantity = parseInt(qtyInput.value, 10) || 1;
-    const dDate = deliveryDateInput.value, dTime = deliveryTimeInput.value || '12:00';
-    if(dDate) order.deliveryDateTime = dDate + 'T' + dTime + ':00';
-    order.photo = pendingPhoto;
-    order.price = price;
-    order.advancePaid = advancePaid;
-    order.acceptanceStatus = 'accepted';
-    order.paymentStatus = 'confirmed';
-
-    const btn = $('paymentApprovedBtn'); btn.disabled = true;
-    try{
-      await saveOrder(order);
-      toast('Payment approved — order confirmed');
-      sendWhatsAppPaymentApproved(order);
-      closeSheet();
-      render();
-    }catch(e){
-      toast((e && e.message) ? e.message : 'Could not save — try again');
-    }
-    btn.disabled = false;
   });
 
   deleteBtn.addEventListener('click', async () => {
@@ -1053,13 +932,12 @@
     }
     arr.forEach(order => {
       const u = urgency(order);
-      const rejLock = rejectLockInfo(order);
       const remaining = (order.price || 0) - (order.advancePaid || 0);
       const card = document.createElement('div');
       card.className = 'ticket' + (isDelivered(order) ? ' completed' : '');
       card.innerHTML = `
         <div class="ticket-top">
-          <div class="ticket-photo${order.photo ? ' has-photo' : ''}">${order.photo ? '<img src="'+order.photo+'" style="width:100%;height:100%;object-fit:cover;">' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>'}</div>
+          <div class="ticket-photo">${order.photo ? '<img src="'+order.photo+'" style="width:100%;height:100%;object-fit:cover;">' : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>'}</div>
           <div class="ticket-info">
             <p class="cust-name">${order.orderNumber ? '<span class="mono" style="background:'+(order.orderType==='custom_request'?'var(--rust)':'var(--gold)')+';color:#fff;padding:1px 7px;border-radius:5px;font-size:11px;margin-right:6px;">'+(order.orderType==='custom_request'?'🎨 ':'#')+escapeHtml(order.orderNumber)+'</span>' : ''}${escapeHtml(order.customerName || 'Walk-in customer')}${order.customerPhone ? ' · <a class="call-link" href="tel:'+escapeHtml(order.customerPhone)+'">'+escapeHtml(order.customerPhone)+'</a>' : ''}</p>
             ${order.orderType === 'custom_request'
@@ -1093,10 +971,7 @@
         <div class="status-row">
           ${isPendingAcceptance(order) ? `
             <button class="chip-btn accept-btn" style="background:var(--sage);border-color:var(--sage);color:#fff;">✓ Accept order</button>
-            ${order.source === 'customer' && order.customerPhone && order.paymentStatus !== 'confirmed' && order.paymentStatus !== 'deposit_paid_awaiting_confirmation' ? `
-            <button class="chip-btn remind-btn" style="background:var(--gold);border-color:var(--gold);color:#fff;">📲 ${order.paymentReminderSentAt ? 'Remind again' : 'Remind to pay'}</button>
-            ` : ''}
-            <button class="chip-btn reject-btn" ${rejLock.locked ? 'disabled' : ''} style="background:var(--rust);border-color:var(--rust);color:#fff;${rejLock.locked ? 'opacity:.45;cursor:not-allowed;' : ''}">✕ ${rejLock.locked ? 'Reject (wait ' + rejLock.label + ')' : 'Reject'}</button>
+            <button class="chip-btn reject-btn" style="background:var(--rust);border-color:var(--rust);color:#fff;">✕ Reject</button>
           ` : `
           <button class="chip-btn baked-btn ${order.baked ? 'baked-on' : ''}">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="14" r="7"/><path d="M9 3h6M12 3v4"/></svg>
@@ -1110,13 +985,8 @@
           `}
         </div>
       `;
-      if(order.photo){
-        const photoEl = card.querySelector('.ticket-photo');
-        photoEl.addEventListener('click', () => openPhotoLightbox(order.photo));
-      }
       if(isPendingAcceptance(order)){
         card.querySelector('.accept-btn').addEventListener('click', async () => {
-          if(isReadOnly) return;
           order.acceptanceStatus = 'accepted';
           if(order.orderType !== 'custom_request'){
             order.paymentStatus = 'confirmed';
@@ -1129,20 +999,7 @@
           sendWhatsAppConfirmation(order);
           render();
         });
-        const remindBtn = card.querySelector('.remind-btn');
-        if(remindBtn){
-          remindBtn.addEventListener('click', async () => {
-            if(isReadOnly) return;
-            order.paymentReminderSentAt = new Date().toISOString();
-            try{ await saveOrder(order); }catch(e){ toast('Could not save — try again'); return; }
-            sendWhatsAppPaymentReminder(order);
-            toast('Payment reminder sent — reject unlocks in 5 minutes if unpaid');
-            render();
-          });
-        }
         card.querySelector('.reject-btn').addEventListener('click', () => {
-          if(isReadOnly) return;
-          if(rejectLockInfo(order).locked){ toast('Reject unlocks 5 minutes after the payment reminder'); return; }
           openRejectSheet(order);
         });
       } else {
@@ -1161,18 +1018,8 @@
           });
         }
         card.querySelector('.delivered-btn').addEventListener('click', async () => {
-          const nowDelivered = !isDelivered(order);
-          order.delivered = nowDelivered;
+          order.delivered = !isDelivered(order);
           delete order.status;
-          if(nowDelivered){
-            // Marking as delivered automatically marks the cake as baked and fully paid.
-            order.baked = true;
-            if(!order.bakedLocation) order.bakedLocation = 'icing_room';
-            if(order.price){
-              order.advancePaid = order.price;
-              order.paymentStatus = 'confirmed';
-            }
-          }
           await saveOrder(order);
           render();
         });
@@ -1180,22 +1027,7 @@
       card.querySelector('.edit-btn').addEventListener('click', () => openSheet(order));
       list.appendChild(card);
     });
-    scheduleRejectUnlockCheck();
   }
-
-  // ---------- Photo lightbox ----------
-  const photoLightbox = $('photoLightbox');
-  const photoLightboxImg = $('photoLightboxImg');
-  function openPhotoLightbox(src){
-    photoLightboxImg.src = src;
-    photoLightbox.classList.add('open');
-  }
-  function closePhotoLightbox(){
-    photoLightbox.classList.remove('open');
-    photoLightboxImg.src = '';
-  }
-  $('photoLightboxClose').addEventListener('click', closePhotoLightbox);
-  photoLightbox.addEventListener('click', (e) => { if(e.target === photoLightbox) closePhotoLightbox(); });
 
   // ---------- Notifications ----------
   function updateBellUI(){
@@ -1331,5 +1163,56 @@
   })();
 })();
 </script>
+
+<script>
+(function(){
+  try{
+    var isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+    if(isStandalone) return;
+
+    var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
+    var deferredPrompt = null;
+
+    window.addEventListener('beforeinstallprompt', function(e){
+      e.preventDefault();
+      deferredPrompt = e;
+    });
+
+    function buildInstallBanner(){
+      if(document.getElementById('bnbInstallBanner')) return;
+      var banner = document.createElement('div');
+      banner.id = 'bnbInstallBanner';
+      banner.style.cssText = 'position:fixed;left:12px;right:12px;bottom:14px;z-index:99999;background:#572516;color:#F7F1E4;border-radius:14px;padding:13px 14px;box-shadow:0 10px 30px rgba(0,0,0,0.35);display:flex;align-items:center;gap:10px;font-family:"DM Sans",sans-serif;border:1.5px solid #C6952F;max-width:420px;margin:0 auto;';
+      banner.innerHTML =
+        '<div style="flex:1;font-size:12.5px;line-height:1.4;">' +
+          '<strong style="display:block;margin-bottom:2px;font-size:13.5px;">Install this app</strong>' +
+          '<span id="bnbInstallText">' + (isIOS ? 'Tap the Share icon below, then "Add to Home Screen".' : 'Add to your home screen for quick, full-screen access.') + '</span>' +
+        '</div>' +
+        (isIOS ? '' : '<button id="bnbInstallBtn" style="background:#C6952F;color:#2A211F;border:none;padding:9px 13px;border-radius:9px;font-weight:700;font-size:12px;cursor:pointer;white-space:nowrap;">Install</button>') +
+        '<button id="bnbInstallClose" style="background:none;border:none;color:#F7F1E4;font-size:20px;cursor:pointer;padding:0 4px;line-height:1;">×</button>';
+      document.body.appendChild(banner);
+
+      document.getElementById('bnbInstallClose').addEventListener('click', function(){ banner.remove(); });
+
+      var btn = document.getElementById('bnbInstallBtn');
+      if(btn){
+        btn.addEventListener('click', function(){
+          if(deferredPrompt){
+            deferredPrompt.prompt();
+            deferredPrompt.userChoice.then(function(){ deferredPrompt = null; banner.remove(); });
+          } else {
+            document.getElementById('bnbInstallText').textContent = 'Open your browser menu (⋮) and tap "Install app" or "Add to Home screen".';
+          }
+        });
+      }
+    }
+
+    window.addEventListener('load', function(){
+      setTimeout(buildInstallBanner, 900);
+    });
+  }catch(e){ console.error('install banner error', e); }
+})();
+</script>
+
 </body>
 </html>
