@@ -657,7 +657,7 @@
         + '. Suggest: 1) a short, appealing product name (max 6 words, no quotes), and 2) a 1-2 sentence mouth-watering menu description. '
         + 'Respond with ONLY valid JSON, no markdown formatting, in exactly this shape: {"name": "...", "description": "..."}';
 
-      const model = 'gemini-2.0-flash';
+      const model = 'gemini-2.5-flash';
       const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent?key=' + encodeURIComponent(geminiApiKey), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -680,7 +680,7 @@
       toast('AI suggestion added — feel free to edit it');
     }catch(e){
       console.error('AI suggestion error', e);
-      toast('Could not get an AI suggestion — check your API key and connection');
+      toast('AI request failed: ' + (e && e.message ? e.message : 'check your API key and connection'));
     }
     btn.disabled = false; btn.textContent = originalLabel;
   });
