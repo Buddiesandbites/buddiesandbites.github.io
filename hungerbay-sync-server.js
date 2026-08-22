@@ -67,22 +67,67 @@ function parseQty(text) {
 
 function normalizeStatus(raw) {
   const s = stripHtml(raw).toLowerCase();
+
   if (s.includes('food is ready')) return 'food is ready';
   if (s.includes('acknowledged')) return 'acknowledged';
   if (s.includes('accepted')) return 'accepted';
-  if (s.includes('cancel')) return 'cancelled';
+
+  // HungerBay may use "rejected", "reject", "declined", or "decline"
+  if (
+    s.includes('rejected') ||
+    s.includes('reject') ||
+    s.includes('declined') ||
+    s.includes('decline')
+  ) {
+    return 'rejected';
+  }
+
+  if (
+    s.includes('cancelled') ||
+    s.includes('canceled') ||
+    s.includes('cancel')
+  ) {
+    return 'cancelled';
+  }
+
   if (s.includes('refund')) return 'refunded';
-  if (s.includes('decline')) return 'decline';
   if (s.includes('pending')) return 'pending';
   if (s.includes('paid')) return 'paid';
   if (s.includes('delayed')) return 'delayed';
   if (s.includes('failed')) return 'failed';
   if (s.includes('successful')) return 'successful';
+
   return s || 'unknown';
+}
+
+function mapAcceptanceStatus(hungerbayStatus) {
+  switch (hungerbayStatus) {
+    case 'pending':
+      return 'new';
+
+    case 'acknowledged':
+      return 'acknowledged';
+
+    case 'accepted':
+      return 'accepted';
+
+    case 'rejected':
+      return 'rejected';
+
+    case 'cancelled':
+      return 'cancelled';
+
+    case 'refunded':
+      return 'refunded';
+
+    default:
+      return hungerbayStatus || 'unknown';
+  }
 }
 
 function mapRow(row) {
   const cells = Array.isArray(row) ? row : [];
+
   const orderId = stripHtml(cells[0]);
   const customerName = stripHtml(cells[1]);
   const itemsText = stripHtml(cells[2]);
@@ -93,35 +138,96 @@ function mapRow(row) {
   const hungerbayStatus = normalizeStatus(cells[7]);
   const liveAction = stripHtml(cells[8]);
 
-  if (!orderId || !/^[A-Za-z0-9_-]+$/.test(orderId)) return null;
+  if (!orderId || !/^[A-Za-z0-9_-]+$/.test(orderId)) {
+    return null;
+  }
+
+  let acceptanceStatus = 'unknown';
+
+  if (
+    hungerbayStatus === 'pending' ||
+    hungerbayStatus === 'acknowledged'
+  ) {
+    acceptanceStatus = 'new';
+  } else if (hungerbayStatus === 'accepted') {
+    acceptanceStatus = 'accepted';
+  } else if (hungerbayStatus === 'rejected') {
+    acceptanceStatus = 'rejected';
+  } else if (hungerbayStatus === 'cancelled') {
+    acceptanceStatus = 'cancelled';
+  }
+
+  let paymentStatus = 'unknown';
+
+  if (
+    hungerbayStatus === 'paid' ||
+    hungerbayStatus === 'successful'
+  ) {
+    paymentStatus = 'confirmed';
+  }
+
+  if (
+    hungerbayStatus === 'refunded'
+  ) {
+    paymentStatus = 'refunded';
+  }
 
   return {
     id: `hungerbay_${orderId}`,
+
     source: 'hungerbay',
+    orderSource: 'HungerBay',
+    orderReference: 'Order by HungerBay',
+
     hungerbayOrderId: orderId,
     orderNumber: orderId,
+
     customerName,
     customerPhone: '',
     customerAddress: '',
+    deliveryInstruction: '',
+
+    subtotal: 0,
+    deliveryFee: 0,
+    tax: 0,
+    total: 0,
+
+    items: [],
+
     flavour: itemsText,
     description: itemsText,
     quantity: parseQty(itemsText),
     price: parseMoney(itemsText),
+
     advancePaid: 0,
+
     orderDate: new Date().toISOString().slice(0, 10),
+
     deliveryDate,
     deliveryTime,
-    deliveryDateTime: makeDateTime(deliveryDate, deliveryTime),
+    deliveryDateTime: makeDateTime(
+      deliveryDate,
+      deliveryTime
+    ),
+
     transactionType,
     paymentType,
+
     hungerbayStatus,
     hungerbayLiveAction: liveAction,
-    acceptanceStatus: ['pending', 'acknowledged'].includes(hungerbayStatus) ? 'new' : 'accepted',
-    paymentStatus: ['paid', 'successful'].includes(hungerbayStatus) ? 'confirmed' : 'unknown',
+
+    acceptanceStatus,
+    paymentStatus,
+
     baked: hungerbayStatus === 'food is ready',
+
     delivered: false,
-    hungerbayLastSyncedAt: admin.firestore.FieldValue.serverTimestamp(),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp()
+
+    hungerbayLastSyncedAt:
+      admin.firestore.FieldValue.serverTimestamp(),
+
+    updatedAt:
+      admin.firestore.FieldValue.serverTimestamp()
   };
 }
 
