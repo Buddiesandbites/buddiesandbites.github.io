@@ -156,16 +156,51 @@ function parseResponse(text) {
 
 async function getRecentOrders(page) {
   let captured = null;
+
   const handler = async response => {
     try {
-      if (!response.url().endsWith('/admin/ajax')) return;
-      const req = response.request();
-      if (req.method() !== 'POST') return;
-      const body = req.postData() || '';
-      if (!body.includes('recentOrderInitial')) return;
-      captured = await response.text();
-    } catch (_) {}
+      const url = response.url();
+
+      if (!url.includes('/admin/ajax')) return;
+      if (!url.includes('action=recentOrderInitial')) return;
+
+      console.log('[sync] Found recentOrderInitial request');
+      console.log('[sync] Method:', response.request().method());
+      console.log('[sync] URL:', url);
+
+      const text = await response.text();
+
+      console.log('[sync] HungerBay order response:', text);
+
+      if (text.includes('aaData')) {
+        captured = text;
+      }
+    } catch (e) {
+      console.log('[sync] Response error:', e.message);
+    }
   };
+
+  page.on('response', handler);
+
+  console.log('[sync] Opening HungerBay dashboard...');
+
+  await page.goto(DASHBOARD_URL, {
+    waitUntil: 'domcontentloaded',
+    timeout: 60000
+  });
+
+  await page.waitForTimeout(5000);
+
+  page.off('response', handler);
+
+  if (!captured) {
+    throw new Error(
+      'Could not capture HungerBay recentOrderInitial response'
+    );
+  }
+
+  return parseResponse(captured);
+}
   page.on('response', handler);
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(2500);
