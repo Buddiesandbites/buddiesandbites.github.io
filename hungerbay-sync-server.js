@@ -201,12 +201,6 @@ async function getRecentOrders(page) {
 
   return parseResponse(captured);
 }
-  page.on('response', handler);
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(2500);
-  page.off('response', handler);
-  if (!captured) throw new Error('Could not capture HungerBay recentOrderInitial response');
-  return parseResponse(captured);
 }
 
 async function ensureLoggedIn(page) {
