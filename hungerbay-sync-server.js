@@ -161,23 +161,21 @@ async function getRecentOrders(page) {
     try {
       const url = response.url();
       const req = response.request();
+      const method = req.method();
 
-      console.log('[sync] AJAX RESPONSE CANDIDATE');
-      console.log('[sync] Method:', req.method());
+      // HungerBay currently loads recentOrderInitial with GET.
+      // Keep POST support too in case HungerBay changes it later.
+      if (!url.includes('/admin/ajax')) return;
+      if (!url.includes('action=recentOrderInitial')) return;
+      if (method !== 'GET' && method !== 'POST') return;
+
+      console.log('[sync] Found recentOrderInitial request');
+      console.log('[sync] Method:', method);
       console.log('[sync] URL:', url);
 
-      // HungerBay uses GET for recentOrderInitial
-      if (!url.includes('/admin/ajax')) return;
-      if (req.method() !== 'GET') return;
-      if (!url.includes('action=recentOrderInitial')) return;
+      captured = await response.text();
 
-      console.log('[sync] *** FOUND recentOrderInitial response ***');
-
-      const text = await response.text();
-
-      console.log('[sync] HungerBay order response:', text);
-
-      captured = text;
+      console.log('[sync] HungerBay order response:', captured);
     } catch (e) {
       console.error('[sync] Response capture error:', e.message);
     }
@@ -192,9 +190,6 @@ async function getRecentOrders(page) {
     timeout: 60000
   });
 
-  console.log('[sync] Dashboard loaded:', page.url());
-
-  // Give HungerBay's JavaScript enough time to make the AJAX request
   await page.waitForTimeout(5000);
 
   page.off('response', handler);
@@ -205,9 +200,12 @@ async function getRecentOrders(page) {
     );
   }
 
-  return parseResponse(captured);
-}
+  const rows = parseResponse(captured);
 
+  console.log('[sync] Parsed HungerBay rows:', rows.length);
+
+  return rows;
+}
 async function ensureLoggedIn(page) {
   await page.goto(DASHBOARD_URL, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(1500);
