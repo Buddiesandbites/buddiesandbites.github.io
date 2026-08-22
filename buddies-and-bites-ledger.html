@@ -304,7 +304,7 @@
   .hungerbay-sync .hb-dot{width:8px;height:8px;border-radius:50%;background:#7BB86A;display:inline-block;}
   .hungerbay-sync button{border:1px solid rgba(247,241,228,.25);background:rgba(255,255,255,.06);color:#f7f1e4;border-radius:8px;padding:6px 10px;font:700 11px 'Space Mono',monospace;cursor:pointer;}
   .hungerbay-sync button:disabled{opacity:.5;cursor:wait;}
-  .hb-badge{display:inline-flex;align-items:center;gap:4px;background:#fff2c2;color:#6e5200;border:1px solid #e5c85d;border-radius:999px;padding:2px 7px;font:700 10px 'Space Mono',monospace;}
+  .hb-badge{display:inline-flex;align-items:center;gap:4px;background:#fff2c2;color:#6e5200;border:1px solid #e5c85d;border-radius:999px;padding:3px 8px;font:700 10px 'Space Mono',monospace;white-space:nowrap;vertical-align:middle;}
 </style>
 
 <script>
@@ -520,11 +520,21 @@
   function isDelivered(order){
     return order.delivered === true || order.status === 'completed';
   }
-  function isHungerBay(order){ return !!(order && (order.source === 'hungerbay' || order.hungerbayOrderId || order.hungerBayOrderId)); }
+  function isHungerBay(order){
+    if(!order) return false;
+    const source = String(order.source || '').trim().toLowerCase();
+    const orderId = String(order.id || '').trim().toLowerCase();
+    return source === 'hungerbay'
+      || !!order.hungerbayOrderId
+      || !!order.hungerBayOrderId
+      || orderId.startsWith('hungerbay_');
+  }
   function hungerBayLabel(order){
     if(!isHungerBay(order)) return '';
     const ref = order.hungerbayOrderId || order.hungerBayOrderId || order.orderNumber || '';
-    return '<span class="hb-badge">Order by HungerBay' + (ref ? ' #' + escapeHtml(ref) : '') + '</span>';
+    return '<span class="hb-badge" title="Imported automatically from HungerBay">Order by HungerBay'
+      + (ref ? ' #' + escapeHtml(ref) : '')
+      + '</span>';
   }
   async function syncHungerBayOrders(){
     if(isReadOnly){ toast('View-only account cannot run a sync'); return; }
