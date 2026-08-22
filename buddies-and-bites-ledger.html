@@ -997,48 +997,25 @@
     return order.source === 'customer' && order.acceptanceStatus === 'new';
   }
   function isRejected(order){
-  const status = String(
-    order.hungerbayStatus ||
-    order.acceptanceStatus ||
-    order.status ||
-    order.orderStatus ||
-    ''
-  ).toLowerCase();
-
-  return status === 'rejected' ||
-         status === 'cancelled' ||
-         status === 'canceled' ||
-         status === 'refunded';
-}
+    return order.acceptanceStatus === 'rejected';
   }
 
-function isHungerBayCancelled(order) {
-  const hungerbayStatus = String(
-    order.hungerbayStatus ||
-    order.acceptanceStatus ||
-    order.status ||
-    order.orderStatus ||
-    ''
-  ).toLowerCase();
-
-  if (isHungerBay(order) && hungerbayStatus === 'cancelled') {
-    return {
-      cls: 'overdue',
-      label: 'CANCELLED'
-    };
-  }
-
-  return false;
-}
-}
-
-if (isHungerBay(order) && hungerbayStatus === 'canceled') {
-  return {cls:'overdue', label:'CANCELLED'};
-}
-
-if (isHungerBay(order) && hungerbayStatus === 'rejected') {
-  return {cls:'overdue', label:'REJECTED'};
-}
+  function urgency(order){
+    if(isRejected(order)) return {cls:'overdue', label:'REJECTED'};
+    if(isPendingAcceptance(order)) return {cls:'today', label:'NEEDS REVIEW'};
+    if(isDelivered(order)) return {cls:'done', label:'DELIVERED'};
+    const now = new Date();
+    const dt = new Date(order.deliveryDateTime);
+    const diffMs = dt - now;
+    if(diffMs < 0) return {cls:'overdue', label:'OVERDUE'};
+    const dayDiff = calendarDayDiff(dt, now);
+    if(dayDiff <= 0){
+      const diffH = diffMs / 3600000;
+      if(diffH < 6) return {cls:'today', label: Math.max(1, Math.round(diffH)) + 'H LEFT'};
+      return {cls:'today', label:'TODAY'};
+    }
+    if(dayDiff === 1) return {cls:'soon', label:'TOMORROW'};
+    return {cls:'later', label: dayDiff + ' DAYS'};
   }
 
   function fmtDate(iso){
