@@ -14,7 +14,7 @@ const { URLSearchParams } = require('url');
 require('dotenv').config();
 
 const PORT = Number(process.env.PORT || 8787);
-const DASHBOARD_URL = process.env.HUNGERBAY_DASHBOARD_URL || 'https://hungerbay.com/merchant';
+const DASHBOARD_URL = process.env.HUNGERBAY_DASHBOARD_URL || 'https://hungerbay.com/merchant/dash-board';
 const STORAGE_STATE = path.resolve(process.env.HUNGERBAY_STORAGE_STATE || './hungerbay-storage.json');
 const POLL_MS = Number(process.env.HUNGERBAY_POLL_MS || 60000);
 const FIREBASE_SERVICE_ACCOUNT = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
