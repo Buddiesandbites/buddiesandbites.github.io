@@ -997,7 +997,19 @@
     return order.source === 'customer' && order.acceptanceStatus === 'new';
   }
   function isRejected(order){
-    return order.acceptanceStatus === 'rejected';
+  const status = String(
+    order.hungerbayStatus ||
+    order.acceptanceStatus ||
+    order.status ||
+    order.orderStatus ||
+    ''
+  ).toLowerCase();
+
+  return status === 'rejected' ||
+         status === 'cancelled' ||
+         status === 'canceled' ||
+         status === 'refunded';
+}
   }
 
   function urgency(order){
