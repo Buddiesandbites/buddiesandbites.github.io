@@ -160,23 +160,26 @@ async function getRecentOrders(page) {
   const handler = async response => {
     try {
       const url = response.url();
+      const req = response.request();
 
+      console.log('[sync] AJAX RESPONSE CANDIDATE');
+      console.log('[sync] Method:', req.method());
+      console.log('[sync] URL:', url);
+
+      // HungerBay uses GET for recentOrderInitial
       if (!url.includes('/admin/ajax')) return;
+      if (req.method() !== 'GET') return;
       if (!url.includes('action=recentOrderInitial')) return;
 
-      console.log('[sync] Found recentOrderInitial request');
-      console.log('[sync] Method:', response.request().method());
-      console.log('[sync] URL:', url);
+      console.log('[sync] *** FOUND recentOrderInitial response ***');
 
       const text = await response.text();
 
       console.log('[sync] HungerBay order response:', text);
 
-      if (text.includes('aaData')) {
-        captured = text;
-      }
+      captured = text;
     } catch (e) {
-      console.log('[sync] Response error:', e.message);
+      console.error('[sync] Response capture error:', e.message);
     }
   };
 
@@ -189,6 +192,9 @@ async function getRecentOrders(page) {
     timeout: 60000
   });
 
+  console.log('[sync] Dashboard loaded:', page.url());
+
+  // Give HungerBay's JavaScript enough time to make the AJAX request
   await page.waitForTimeout(5000);
 
   page.off('response', handler);
@@ -200,7 +206,6 @@ async function getRecentOrders(page) {
   }
 
   return parseResponse(captured);
-}
 }
 
 async function ensureLoggedIn(page) {
