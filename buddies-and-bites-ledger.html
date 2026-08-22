@@ -1012,15 +1012,24 @@
 }
   }
 
- const hungerbayStatus = String(
-  order.hungerbayStatus ||
-  order.acceptanceStatus ||
-  order.status ||
-  ''
-).toLowerCase();
+function isHungerBayCancelled(order) {
+  const hungerbayStatus = String(
+    order.hungerbayStatus ||
+    order.acceptanceStatus ||
+    order.status ||
+    order.orderStatus ||
+    ''
+  ).toLowerCase();
 
-if (isHungerBay(order) && hungerbayStatus === 'cancelled') {
-  return {cls:'overdue', label:'CANCELLED'};
+  if (isHungerBay(order) && hungerbayStatus === 'cancelled') {
+    return {
+      cls: 'overdue',
+      label: 'CANCELLED'
+    };
+  }
+
+  return false;
+}
 }
 
 if (isHungerBay(order) && hungerbayStatus === 'canceled') {
