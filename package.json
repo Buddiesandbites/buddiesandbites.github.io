@@ -1,0 +1,18 @@
+{
+  "name": "buddies-and-bites-hungerbay-sync",
+  "private": true,
+  "version": "0.3.0",
+  "scripts": {
+    "login": "node hungerbay-login.js",
+    "start": "node hungerbay-sync-server.js",
+    "backup": "node backup-firestore.js",
+    "generate-vapid": "node -e \"const w=require('web-push'); const fs=require('fs'); const k=w.generateVAPIDKeys(); fs.writeFileSync('vapid-keys.json', JSON.stringify(k,null,2)); console.log('VAPID_PUBLIC_KEY='+k.publicKey); console.log('VAPID_PRIVATE_KEY='+k.privateKey);\""
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "firebase-admin": "^12.7.0",
+    "playwright": "^1.49.1",
+    "web-push": "^3.6.7"
+  }
+}

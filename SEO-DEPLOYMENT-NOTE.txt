@@ -1,0 +1,8 @@
+Buddies & Bites Rangpo SEO deployment
+
+Canonical URL: https://buddiesandbites.github.io/
+Sitemap: https://buddiesandbites.github.io/sitemap.xml
+Robots: https://buddiesandbites.github.io/robots.txt
+
+After publishing to GitHub Pages, verify the sitemap and submit it in Google Search Console.
+Then use URL Inspection for https://buddiesandbites.github.io/ and request indexing.

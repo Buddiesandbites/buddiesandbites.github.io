@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /buddies-and-bites-admin.html
+Disallow: /buddies-and-bites-ads-manager.html
+Disallow: /buddies-and-bites-ledger.html
+Disallow: /buddies-and-bites-login.html
+Disallow: /buddies-and-bites-manage-products.html
+
+Sitemap: https://buddiesandbites.github.io/sitemap.xml

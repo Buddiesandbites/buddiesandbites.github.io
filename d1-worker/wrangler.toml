@@ -1,0 +1,8 @@
+name = "buddiesandbites-d1-api"
+main = "src/index.js"
+compatibility_date = "2026-08-24"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "buddiesandbites"
+database_id = "b96f10a1-371a-49ba-ba7b-f2ff85248962"
