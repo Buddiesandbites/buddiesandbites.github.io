@@ -66,17 +66,17 @@
   }
 
   class QuerySnapshot {
-    constructor(refs, rows) {
+    constructor(refs, rows, changes) {
       this.docs = (rows || []).map(row => new DocumentSnapshot(refs.doc(row.id), row));
+      this._changes = changes || null;
       this.size = this.docs.length;
       this.empty = this.size === 0;
     }
     forEach(cb) { this.docs.forEach(cb); }
     docChanges() {
+      if (this._changes) return this._changes;
       // The D1 polling layer does not have Firestore's native change stream.
       // Return a Firestore-compatible 'added' change for the current snapshot.
-      // The Ledger itself compares the previous order list to detect genuinely
-      // new/modified orders.
       return this.docs.map(doc => ({ type: 'added', doc }));
     }
   }
@@ -146,12 +146,17 @@
   }
 
   class Query {
-    constructor(collection) { this.collection = collection; this._order = null; this._limit = 100; }
+    constructor(collection) { this.collection = collection; this._order = null; this._limit = 100; this._currentOnly = false; this._from = null; this._to = null; }
     orderBy(field, direction) { this._order = { field, direction: direction || 'asc' }; return this; }
+    currentOnly(enabled = true) { this._currentOnly = !!enabled; return this; }
+    dateRange(from, to) { this._from = from || null; this._to = to || null; this._currentOnly = false; return this; }
     limit(n) { this._limit = Math.min(Math.max(Number(n) || 100, 1), 500); return this; }
     where(field, op, value) { this._where = { field, op, value }; return this; }
     async get() {
-      let body = await request('/api/' + encode(this.collection.name) + '?limit=' + this._limit);
+      let params = new URLSearchParams({ limit: String(this._limit) });
+      if (this._currentOnly) params.set('current', '1');
+      if (this._from && this._to) { params.set('from', this._from); params.set('to', this._to); }
+      let body = await request('/api/' + encode(this.collection.name) + '?' + params.toString());
       let rows = (body.documents || body.orders || []).map(x => ({ id: x.id, data: x.data, created_at: x.created_at, updated_at: x.updated_at }));
       if (this._where) {
         const { field, op, value } = this._where;
@@ -169,16 +174,112 @@
       return new QuerySnapshot(this.collection, rows.slice(0, this._limit));
     }
     onSnapshot(success, error) {
-      let stopped = false, last = '';
+      let stopped = false;
+      let current = new Map();
+      let since = null;
+      let initialized = false;
+
+      const applyQueryRules = (rows) => {
+        let out = rows.slice();
+
+        if (this._where) {
+          const { field, op, value } = this._where;
+          out = out.filter(r => op === '==' ? r.data && r.data[field] === value : true);
+        }
+
+        if (this._order) {
+          const f = this._order.field, dir = this._order.direction === 'desc' ? -1 : 1;
+          out.sort((a,b) => {
+            const av = a.data && a.data[f], bv = b.data && b.data[f];
+            const ax = Date.parse(av), bx = Date.parse(bv);
+            const aa = Number.isFinite(ax) ? ax : av, bb = Number.isFinite(bx) ? bx : bv;
+            return (aa < bb ? -1 : aa > bb ? 1 : 0) * dir;
+          });
+        } else {
+          // The Worker returns newest-updated first; retain that useful
+          // ordering when no explicit orderBy() is supplied.
+          out.sort((a,b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')));
+        }
+
+        return out.slice(0, this._limit);
+      };
+
+      const makeSnapshot = (rows, changeRows, initial, previous) => {
+        const filtered = applyQueryRules(rows);
+        const changeMap = new Map((changeRows || []).map(r => [r.id, r]));
+        const refs = this.collection;
+        const changes = initial
+          ? filtered.map(r => ({ type: 'added', doc: new DocumentSnapshot(refs.doc(r.id), r) }))
+          : filtered
+              .filter(r => changeMap.has(r.id))
+              .map(r => ({
+                type: previous && previous.has(r.id) ? 'modified' : 'added',
+                doc: new DocumentSnapshot(refs.doc(r.id), r)
+              }));
+        return new QuerySnapshot(refs, filtered, changes);
+      };
+
       const poll = async () => {
         if (stopped) return;
         try {
-          const snap = await this.get();
-          const key = JSON.stringify(snap.docs.map(d => ({ id:d.id, data:d.data() })));
-          if (key !== last) { last = key; success(snap); }
-        } catch (e) { if (error) error(e); }
+          // First load is a single normal query. After that, only documents
+          // changed since the last server timestamp are fetched.
+          if (!initialized && this.collection.name === 'orders') {
+            const snap = await this.get();
+            const rows = snap.docs.map(d => ({
+              id: d.id, data: d.data(),
+              updated_at: d._row && d._row.updated_at,
+              created_at: d._row && d._row.created_at
+            }));
+            current = new Map(rows.map(r => [r.id, r]));
+            since = rows.reduce((max, r) => {
+              const v = r.updated_at || r.created_at || null;
+              return !max || (v && v > max) ? v : max;
+            }, null);
+            initialized = true;
+            success(makeSnapshot(rows, rows, true));
+          } else if (this.collection.name === 'orders') {
+            const params = new URLSearchParams({ collection: 'orders', limit: String(this._limit) });
+            if (since) params.set('since', since);
+            if (this._currentOnly) params.set('current', '1');
+            if (this._from && this._to) { params.set('from', this._from); params.set('to', this._to); }
+            const q = '/api/changes?' + params.toString();
+            const body = await request(q);
+            const changed = (body.changes || []).map(x => ({
+              id: x.id,
+              data: x.data,
+              updated_at: x.updated_at,
+              created_at: x.created_at
+            }));
+
+            if (changed.length) {
+              const previous = new Map(current);
+              changed.forEach(r => current.set(r.id, r));
+              const rows = Array.from(current.values());
+              // Keep the newest server timestamp as the cursor.
+              since = changed.reduce((max, r) => {
+                const v = r.updated_at || r.created_at || null;
+                return !max || (v && v > max) ? v : max;
+              }, since);
+              success(makeSnapshot(rows, changed, false, previous));
+              current = new Map(rows);
+            }
+          } else {
+            const snap = await this.get();
+            const key = JSON.stringify(snap.docs.map(d => ({ id:d.id, data:d.data() })));
+            if (!initialized || key !== JSON.stringify(Array.from(current.values()).map(r => ({id:r.id,data:r.data})))) {
+              const rows = snap.docs.map(d => ({id:d.id,data:d.data(),updated_at:d._row&&d._row.updated_at,created_at:d._row&&d._row.created_at}));
+              current = new Map(rows.map(r => [r.id,r]));
+              initialized = true;
+              success(snap);
+            }
+          }
+        } catch (e) {
+          if (error) error(e);
+        }
         if (!stopped) setTimeout(poll, POLL_MS);
       };
+
       poll();
       return () => { stopped = true; };
     }
@@ -186,7 +287,14 @@
   }
 
   class CollectionReference extends Query {
-    constructor(name) { super(null); this.name = name; this.collection = this; }
+    constructor(name) {
+      super(null);
+      this.name = name;
+      this.collection = this;
+      // The Order Ledger can contain more than 100 orders. Keep the
+      // compatibility layer from silently truncating its initial snapshot.
+      if (name === 'orders') this._limit = 500;
+    }
     doc(id) { return new DocumentReference(this, id); }
     async add(data) {
       const id = (global.crypto && crypto.randomUUID) ? crypto.randomUUID() : ('d1-' + Date.now() + '-' + Math.random().toString(36).slice(2));

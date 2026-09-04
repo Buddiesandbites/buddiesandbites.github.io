@@ -81,3 +81,10 @@ Never commit:
 - database exports containing customer/order data
 
 See `.gitignore` for the repository-level protections.
+
+### Order Ledger live-refresh update
+- The Ledger performs its initial order load once and then checks for D1 changes every 5 seconds.
+- After the initial load, only orders whose `updated_at` changed are fetched from the Worker.
+- The initial order snapshot supports up to 500 orders instead of silently stopping at 100.
+- No database migration, import, delete, reset, or existing-order modification is performed by this frontend/Worker code change.
+

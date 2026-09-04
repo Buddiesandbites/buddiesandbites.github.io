@@ -890,7 +890,10 @@
 
   function subscribeOrders(){
     if(unsubscribeOrders) unsubscribeOrders();
-    unsubscribeOrders = ordersCollection.onSnapshot((snapshot) => {
+    const q = (historyFromDate && historyToDate)
+      ? ordersCollection.dateRange(historyFromDate, historyToDate)
+      : ordersCollection.currentOnly();
+    unsubscribeOrders = q.onSnapshot((snapshot) => {
       if(initialOrdersSnapshotDone){
         snapshot.docChanges().forEach(change => {
           const o = { ...change.doc.data(), id: change.doc.id };
@@ -912,6 +915,39 @@
       toast("Can't sync with the shared database — check your connection");
       if(badge) badge.innerHTML='<span style="width:7px;height:7px;border-radius:50%;background:var(--rust);display:inline-block;"></span>Offline — trying to reconnect';
     });
+  }
+
+  function updateHistoryFilterUI(){
+    const show = currentFilter === 'all' || currentFilter === 'completed';
+    historyFilter.classList.toggle('show', show);
+    if(show){
+      historyFrom.value = historyFromDate || '';
+      historyTo.value = historyToDate || '';
+      historyApply.textContent = (historyFromDate && historyToDate) ? 'Update dates' : 'Show dates';
+    }
+  }
+
+  function applyHistoryRange(){
+    if(currentFilter !== 'all' && currentFilter !== 'completed') return;
+    const from = historyFrom.value;
+    const to = historyTo.value;
+    if(!from || !to){ toast('Enter both From and To dates'); return; }
+    if(from > to){ toast('From date cannot be after To date'); return; }
+    historyFromDate = from;
+    historyToDate = to;
+    initialOrdersSnapshotDone = false;
+    list.innerHTML = '<div class="empty">Loading selected dates…</div>';
+    subscribeOrders();
+    updateHistoryFilterUI();
+  }
+
+  function clearHistoryRange(){
+    historyFromDate = null;
+    historyToDate = null;
+    initialOrdersSnapshotDone = false;
+    list.innerHTML = '<div class="empty">Loading current orders…</div>';
+    subscribeOrders();
+    updateHistoryFilterUI();
   }
 
   function updateLiveSyncBadge(){
@@ -1431,6 +1467,8 @@
         <div class="status-row">
           ${isCancelled(order) ? `
             <span class="chip-btn" style="background:var(--rust);border-color:var(--rust);color:#fff;cursor:default;">✕ Cancelled — terminal</span>
+          ` : isDelivered(order) ? `
+            <span class="chip-btn delivered-on" style="cursor:default;">✓ Delivered — terminal</span>
           ` : isPendingAcceptance(order) ? `
             <button class="chip-btn accept-btn" style="background:var(--sage);border-color:var(--sage);color:#fff;">✓ Accept order</button>
             ${order.source === 'customer' && order.customerPhone && order.paymentStatus !== 'confirmed' && order.paymentStatus !== 'deposit_paid_awaiting_confirmation' ? `
@@ -1531,7 +1569,7 @@
           if(rejectLockInfo(order).locked){ toast('Reject unlocks 5 minutes after the payment reminder'); return; }
           openRejectSheet(order);
         });
-      } else if(!isCancelled(order)) {
+      } else if(!isCancelled(order) && !isDelivered(order)) {
         card.querySelector('.baked-btn').addEventListener('click', async () => {
           if(isCancelled(order)) return;
           order.baked=!order.baked;

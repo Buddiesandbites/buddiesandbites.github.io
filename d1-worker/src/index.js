@@ -78,6 +78,40 @@ function hasValidStaffKey(request, env) {
   return !!getStaffRole(request, env);
 }
 
+function orderTerminalState(data) {
+  const o = data || {};
+  const values = [
+    o.cancelled === true ? "cancelled" : "",
+    o.acceptanceStatus,
+    o.status,
+    o.hungerbayStatus,
+    o.cancellationStatus,
+    o.cancelStatus
+  ].map(v => String(v || "").trim().toLowerCase());
+
+  const cancelled = values.some(v =>
+    v === "cancelled" || v === "canceled" || v.includes("cancelled") || v.includes("canceled")
+  );
+  const delivered = !cancelled && (o.delivered === true || String(o.status || "").trim().toLowerCase() === "completed");
+
+  return { cancelled, delivered };
+}
+
+function terminalStatusChanged(existing, incoming) {
+  const before = existing || {};
+  const after = incoming || {};
+  const fields = [
+    "cancelled",
+    "acceptanceStatus",
+    "status",
+    "delivered",
+    "hungerbayStatus",
+    "cancellationStatus",
+    "cancelStatus"
+  ];
+  return fields.some(field => JSON.stringify(before[field] ?? null) !== JSON.stringify(after[field] ?? null));
+}
+
 function requireStaffRole(request, env, minimumRole = "readonly") {
   const role = getStaffRole(request, env);
   if (!role) return { ok: false, status: 401, error: "Staff API key required" };
@@ -476,22 +510,47 @@ export default {
         if (!auth.ok) return bad(auth.error, auth.status);
 
         const limit = getLimit(url);
+        const from = url.searchParams.get("from");
+        const to = url.searchParams.get("to");
+        const currentOnly = url.searchParams.get("current") === "1";
 
-        const result = await env.DB
-          .prepare(`
-            SELECT
-              collection_name,
-              document_id,
-              data_json,
-              created_at,
-              updated_at
-            FROM firestore_documents
-            WHERE collection_name = 'orders'
-            ORDER BY updated_at DESC
-            LIMIT ?
-          `)
-          .bind(limit)
-          .all();
+        let sql = `
+          SELECT
+            collection_name,
+            document_id,
+            data_json,
+            created_at,
+            updated_at
+          FROM firestore_documents
+          WHERE collection_name = 'orders'
+        `;
+        const binds = [];
+
+        // The Ledger's default view deliberately excludes historical orders.
+        // Delivered/past orders are loaded only when the user supplies a date range.
+        // Active/unresolved orders remain visible even when their delivery date is old.
+        if (currentOnly) {
+          sql += `
+            AND (
+              (json_extract(data_json, '$.delivered') IS NOT 1
+               AND COALESCE(json_extract(data_json, '$.status'), '') != 'completed')
+              OR json_extract(data_json, '$.deliveryDateTime') IS NULL
+              OR json_extract(data_json, '$.deliveryDateTime') >= ?
+            )
+          `;
+          binds.push(new Date().toISOString().slice(0, 10) + 'T00:00:00');
+        } else if (from && to) {
+          sql += `
+            AND json_extract(data_json, '$.deliveryDateTime') >= ?
+            AND json_extract(data_json, '$.deliveryDateTime') < ?
+          `;
+          binds.push(from + 'T00:00:00', to + 'T23:59:59.999');
+        }
+
+        sql += ' ORDER BY updated_at DESC LIMIT ?';
+        binds.push(limit);
+
+        const result = await env.DB.prepare(sql).bind(...binds).all();
 
         const orders = await Promise.all((result.results || []).map(row => parseRow(row, env.DB)));
 
@@ -533,26 +592,68 @@ export default {
         }
 
         const limit = getLimit(url);
+        const from = url.searchParams.get("from");
+        const to = url.searchParams.get("to");
+        const currentOnly = url.searchParams.get("current") === "1";
 
-        const result = await env.DB
-          .prepare(`
-            SELECT
-              collection_name,
-              document_id,
-              data_json,
-              created_at,
-              updated_at
-            FROM firestore_documents
-            WHERE collection_name = ?
-            ORDER BY updated_at ASC
-            LIMIT ?
-          `)
-          .bind(collection, limit)
-          .all();
+        // When a cursor is supplied, filter in D1 itself instead of loading
+        // the whole collection and filtering in the browser. This keeps the
+        // Ledger fast even when there are many historical orders.
+        let result;
+        const dateClause = currentOnly
+          ? ` AND (
+                (json_extract(data_json, '$.delivered') IS NOT 1
+                 AND COALESCE(json_extract(data_json, '$.status'), '') != 'completed')
+                OR json_extract(data_json, '$.deliveryDateTime') IS NULL
+                OR json_extract(data_json, '$.deliveryDateTime') >= ?
+              )`
+          : (from && to)
+            ? ` AND json_extract(data_json, '$.deliveryDateTime') >= ?
+                AND json_extract(data_json, '$.deliveryDateTime') < ?`
+            : '';
 
-        const changes = (await Promise.all(
+        const dateBinds = currentOnly
+          ? [new Date().toISOString().slice(0, 10) + 'T00:00:00']
+          : (from && to) ? [from + 'T00:00:00', to + 'T23:59:59.999'] : [];
+
+        if (since && Number.isFinite(Date.parse(since))) {
+          result = await env.DB
+            .prepare(`
+              SELECT
+                collection_name,
+                document_id,
+                data_json,
+                created_at,
+                updated_at
+              FROM firestore_documents
+              WHERE collection_name = ?
+                AND updated_at > ?${dateClause}
+              ORDER BY updated_at ASC
+              LIMIT ?
+            `)
+            .bind(collection, since, ...dateBinds, limit)
+            .all();
+        } else {
+          result = await env.DB
+            .prepare(`
+              SELECT
+                collection_name,
+                document_id,
+                data_json,
+                created_at,
+                updated_at
+              FROM firestore_documents
+              WHERE collection_name = ?${dateClause}
+              ORDER BY updated_at ASC
+              LIMIT ?
+            `)
+            .bind(collection, ...dateBinds, limit)
+            .all();
+        }
+
+        const changes = await Promise.all(
           (result.results || []).map(row => parseRow(row, env.DB))
-        )).filter(row => matchesSince(row, since));
+        );
 
         return json({
           ok: true,
@@ -831,6 +932,20 @@ export default {
           if (!auth.ok) return bad(auth.error, auth.status);
         }
 
+        if (collection === "orders") {
+          let existingData = {};
+          try { existingData = JSON.parse(existing.data_json || "{}"); } catch { existingData = {}; }
+          const terminal = orderTerminalState(existingData);
+          if ((terminal.delivered || terminal.cancelled) && terminalStatusChanged(existingData, data)) {
+            return bad(
+              terminal.cancelled
+                ? "Cancelled orders are terminal and their status cannot be changed"
+                : "Delivered orders are terminal and their status cannot be changed",
+              403
+            );
+          }
+        }
+
         await env.DB
           .prepare(`
             UPDATE firestore_documents
@@ -897,6 +1012,22 @@ export default {
         ...existingData,
         ...data
       };
+
+      // Delivered and cancelled orders are terminal. Their status cannot be
+      // changed by staff once that terminal state has been reached. Other
+      // non-status fields may still be edited. This is enforced server-side
+      // so the rule cannot be bypassed by calling the API directly.
+      if (collection === "orders") {
+        const terminal = orderTerminalState(existingData);
+        if ((terminal.delivered || terminal.cancelled) && terminalStatusChanged(existingData, merged)) {
+          return bad(
+            terminal.cancelled
+              ? "Cancelled orders are terminal and their status cannot be changed"
+              : "Delivered orders are terminal and their status cannot be changed",
+            403
+          );
+        }
+      }
 
       await env.DB
         .prepare(`
