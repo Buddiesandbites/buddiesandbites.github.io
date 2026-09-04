@@ -890,6 +890,7 @@
 
   function subscribeOrders(){
     if(unsubscribeOrders) unsubscribeOrders();
+    initialOrdersSnapshotDone = false;
     const q = (historyFromDate && historyToDate)
       ? ordersCollection.dateRange(historyFromDate, historyToDate)
       : ordersCollection.currentOnly();
@@ -913,6 +914,7 @@
         return;
       }
       toast("Can't sync with the shared database — check your connection");
+      list.innerHTML = '<div class="empty">Unable to connect to the shared order book. Please log out and log in again.</div>';
       if(badge) badge.innerHTML='<span style="width:7px;height:7px;border-radius:50%;background:var(--rust);display:inline-block;"></span>Offline — trying to reconnect';
     });
   }
@@ -1760,20 +1762,30 @@
 
   $('logoutLink').addEventListener('click', () => {
     localStorage.removeItem(AUTH_KEY);
+    localStorage.removeItem(STAFF_KEY_STORAGE_KEY);
     location.reload();
   });
 
-  (function checkExistingSession(){
+  (async function checkExistingSession(){
+    // Never trust a cached browser session by itself. The Worker secret may
+    // have been rotated, and an old key would otherwise leave the Ledger
+    // stuck forever on "Connecting to the shared order book…".
     try{
       const raw = localStorage.getItem(AUTH_KEY);
-      if(raw){
+      const staffKey = localStorage.getItem(STAFF_KEY_STORAGE_KEY);
+      if(raw && staffKey){
         const session = JSON.parse(raw);
-        if(session && localStorage.getItem(STAFF_KEY_STORAGE_KEY) && CREDENTIALS[session.username] && CREDENTIALS[session.username].role === session.role){
-          showApp(session);
-          return;
+        if(session && CREDENTIALS[session.username] && CREDENTIALS[session.username].role === session.role){
+          const serverRole = await verifyStaffKey(staffKey);
+          if(serverRole === session.role){
+            showApp(session);
+            return;
+          }
         }
       }
     }catch(e){}
+    localStorage.removeItem(AUTH_KEY);
+    localStorage.removeItem(STAFF_KEY_STORAGE_KEY);
     $('loginScreen').style.display = 'flex';
     $('appRoot').style.display = 'none';
   })();
