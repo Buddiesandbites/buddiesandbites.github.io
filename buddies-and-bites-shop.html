@@ -678,8 +678,6 @@
   }
 
   // ---------- Firebase ----------
-  const firebaseConfig = {};
-  firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
   const productsCol = db.collection('products');
   const ordersCol = db.collection('orders');
@@ -850,8 +848,7 @@
   }).catch(e => console.error(e));
 
   // ---------- AI Chat widget ----------
-  const geminiConfigDoc = db.collection('meta').doc('geminiConfig');
-  let shopGeminiKey = '';
+  const D1_API_BASE = 'https://buddiesandbites-d1-api.buddiesandbites.workers.dev';
   let chatHistory = []; // {role: 'user'|'model', text: '...'}
   let chatSystemPrompt = '';
 
@@ -903,20 +900,10 @@ Instructions:
   $('chatFab').addEventListener('click', openChat);
   $('chatClose').addEventListener('click', () => $('chatWindow').classList.remove('open'));
 
-  geminiConfigDoc.get().then(doc => {
-    if(doc.exists) shopGeminiKey = doc.data().shopApiKey || doc.data().apiKey || '';
-  }).catch(e => console.error(e));
-
   async function sendChatMessage(){
     const input = $('chatInput');
     const text = input.value.trim();
     if(!text) return;
-    if(!shopGeminiKey){
-      addChatMessage('user', text);
-      addChatMessage('model', "Sorry, chat isn't set up yet — please call or WhatsApp us at +91 74072 38101 and we'll help right away!");
-      input.value = '';
-      return;
-    }
     addChatMessage('user', text);
     input.value = '';
     const typingEl = document.createElement('div');
@@ -932,17 +919,17 @@ Instructions:
         parts: [{ text: m.text }]
       })).concat([{ role: 'user', parts: [{ text }] }]);
 
-      const model = 'gemini-3.6-flash';
-      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
+      const res = await fetch(D1_API_BASE + '/api/ai/shop-chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': shopGeminiKey },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: chatSystemPrompt }] },
-          contents
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ systemPrompt: chatSystemPrompt, contents })
       });
       typingEl.remove();
-      if(!res.ok){ const errBody = await res.text(); console.error('Gemini API error', res.status, errBody); throw new Error('AI request failed (' + res.status + '): ' + (errBody.slice(0, 220) || 'No error details returned')); }
+      if(res.status === 503){
+        addChatMessage('model', "Sorry, chat isn't set up yet — please call or WhatsApp us at +91 74072 38101 and we'll help right away!");
+        return;
+      }
+      if(!res.ok){ const errBody = await res.text(); console.error('Gemini API error', res.status, errBody); throw new Error('AI request failed (' + res.status + ')'); }
       const data = await res.json();
       const replyText = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
       addChatMessage('model', (replyText || "Sorry, I didn't quite catch that — could you try asking again?").trim());

@@ -102,7 +102,7 @@
   <div class="login-form" id="loginForm">
     <div class="sub">Admin sign in</div>
     <input type="text" id="loginUser" placeholder="Username" autocomplete="username">
-    <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password">
+    <input type="password" id="loginPass" placeholder="Staff API key" autocomplete="off">
     <button class="signin" id="loginBtn">Sign in</button>
     <div class="error" id="loginError"></div>
   </div>
@@ -130,11 +130,16 @@
 <script>
 (function(){
   const $ = (id) => document.getElementById(id);
+  const AUTH_VERIFY_URL = 'https://buddiesandbites-d1-api.buddiesandbites.workers.dev/api/auth/verify';
+  // Usernames are labels/roles only. The actual secret is never stored in
+  // this source file: enter the same STAFF_API_KEY configured on the Worker.
   const CREDENTIALS = {
-    'Buddies&bites': { password: 'Buddies@519', role: 'master', label: 'Master Admin' },
-    'Aman': { password: 'Aman@519', role: 'readonly', label: 'Aman (View only)' }
+    'Buddies&bites': { role: 'master', label: 'Master Admin' },
+    'Aman': { role: 'readonly', label: 'Aman (View only)' }
   };
   const AUTH_KEY = 'bnb_auth';
+
+  const STAFF_KEY_STORAGE_KEY = 'bnb_staff_key';
 
   function showHub(session){
     $('loginForm').classList.add('hide');
@@ -142,27 +147,49 @@
     $('roleLabel').textContent = CREDENTIALS[session.username] ? CREDENTIALS[session.username].label : session.username;
   }
 
-  $('loginBtn').addEventListener('click', () => {
+  async function verifyStaffKey(staffKey){
+    const res = await fetch(AUTH_VERIFY_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + staffKey },
+      body: '{}'
+    });
+    let body = null; try { body = await res.json(); } catch(_) {}
+    if(!res.ok || !body || !body.ok) throw new Error((body && body.error) || 'Invalid Staff API key');
+    return body.role;
+  }
+
+  $('loginBtn').addEventListener('click', async () => {
     const user = $('loginUser').value.trim();
-    const pass = $('loginPass').value;
+    const staffKey = $('loginPass').value.trim();
     const cred = CREDENTIALS[user];
-    if(!cred || cred.password !== pass){
-      $('loginError').textContent = 'Incorrect username or password';
+    if(!cred || !staffKey){
+      $('loginError').textContent = 'Enter a valid username and Staff API key';
       return;
     }
-    const session = { username: user, role: cred.role };
-    localStorage.setItem(AUTH_KEY, JSON.stringify(session));
-    showHub(session);
+    $('loginBtn').disabled = true;
+    $('loginError').textContent = 'Verifying…';
+    try {
+      const serverRole = await verifyStaffKey(staffKey);
+      if(serverRole !== cred.role){
+        throw new Error(cred.role === 'master' ? 'This key is not a Master Admin key' : 'This key is not a View-only key');
+      }
+      const session = { username: user, role: serverRole };
+      localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+      localStorage.setItem(STAFF_KEY_STORAGE_KEY, staffKey);
+      showHub(session);
+    } catch(e) {
+      $('loginError').textContent = e.message || 'Invalid Staff API key';
+    } finally { $('loginBtn').disabled = false; }
   });
   $('loginPass').addEventListener('keydown', (e) => { if(e.key === 'Enter') $('loginBtn').click(); });
-  $('logoutBtn').addEventListener('click', () => { localStorage.removeItem(AUTH_KEY); location.reload(); });
+  $('logoutBtn').addEventListener('click', () => { localStorage.removeItem(AUTH_KEY); localStorage.removeItem(STAFF_KEY_STORAGE_KEY); location.reload(); });
 
   (function checkExistingSession(){
     try{
       const raw = localStorage.getItem(AUTH_KEY);
       if(raw){
         const session = JSON.parse(raw);
-        if(session && CREDENTIALS[session.username] && CREDENTIALS[session.username].role === session.role){
+        if(session && localStorage.getItem(STAFF_KEY_STORAGE_KEY) && CREDENTIALS[session.username] && CREDENTIALS[session.username].role === session.role){
           showHub(session);
         }
       }
