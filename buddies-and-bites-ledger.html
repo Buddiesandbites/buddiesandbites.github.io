@@ -97,6 +97,23 @@
   .tab.active{ background:var(--plum); border-color:var(--plum); color:var(--cream); }
   .tab .count{ opacity:.65; margin-left:3px; }
 
+  /* ---------- Custom date-range filter (All / Delivered tabs) ---------- */
+  .history-filter{
+    display:none; align-items:center; gap:8px; flex-wrap:wrap;
+    padding:0 16px 12px; margin-top:-4px;
+  }
+  .history-filter.show{ display:flex; }
+  .history-filter input[type=date]{
+    font-family:'DM Sans',sans-serif; font-size:13px; padding:6px 9px;
+    border-radius:8px; border:1.5px solid var(--line); background:var(--paper); color:var(--ink);
+  }
+  .history-filter button{
+    font-family:'DM Sans',sans-serif; font-size:13px; font-weight:700; padding:6px 14px;
+    border-radius:999px; border:1.5px solid var(--gold); background:var(--gold); color:#fff; cursor:pointer;
+  }
+  .history-filter button.ghost{ background:var(--paper); color:var(--ink-soft); border-color:var(--line); }
+  .history-filter .hf-label{ font-size:12px; color:var(--ink-soft); }
+
   /* ---------- Ticket list ---------- */
   main{ padding:10px 16px 20px; max-width:640px; margin:0 auto; }
   .empty{
@@ -378,6 +395,15 @@
 
 <div class="tabs" id="tabs"></div>
 
+<div class="history-filter" id="historyFilter">
+  <span class="hf-label">Show orders between:</span>
+  <input type="date" id="historyFrom">
+  <span class="hf-label">and</span>
+  <input type="date" id="historyTo">
+  <button type="button" id="historyApply">Show dates</button>
+  <button type="button" class="ghost" id="historyClear">Reset to current</button>
+</div>
+
 <main>
   <div id="list"></div>
 </main>
@@ -516,6 +542,7 @@
   const $ = (id) => document.getElementById(id);
   const AUTH_VERIFY_URL = 'https://buddiesandbites-d1-api.buddiesandbites.workers.dev/api/auth/verify';
   const list = $('list'), tabsEl = $('tabs'), nextUp = $('nextUp');
+  const historyFilter = $('historyFilter'), historyFrom = $('historyFrom'), historyTo = $('historyTo'), historyApply = $('historyApply'), historyClear = $('historyClear');
   const sheetBackdrop = $('sheetBackdrop'), sheetTitle = $('sheetTitle');
   const photoUpload = $('photoUpload'), photoInput = $('photoInput'), photoPreview = $('photoPreview'), photoIcon = $('photoIcon'), photoLabel = $('photoLabel'), photoChangeHint = $('photoChangeHint');
   const descInput = $('descInput'), qtyInput = $('qtyInput'), orderDateInput = $('orderDateInput'), deliveryDateInput = $('deliveryDateInput'), deliveryTimeInput = $('deliveryTimeInput');
@@ -953,6 +980,9 @@
     subscribeOrders();
     updateHistoryFilterUI();
   }
+
+  historyApply.addEventListener('click', applyHistoryRange);
+  historyClear.addEventListener('click', clearHistoryRange);
 
   function updateLiveSyncBadge(){
     const el=document.getElementById('lastSyncedAgo'); if(!el || !lastSyncedAt) return;
@@ -1421,6 +1451,7 @@
 
   function render(){
     renderTabs();
+    updateHistoryFilterUI();
     renderNextUp();
     const arr = filteredOrders();
     list.innerHTML = '';

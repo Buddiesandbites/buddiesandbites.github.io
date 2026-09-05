@@ -148,7 +148,7 @@
   class Query {
     constructor(collection) { this.collection = collection; this._order = null; this._limit = 100; this._currentOnly = false; this._from = null; this._to = null; }
     orderBy(field, direction) { this._order = { field, direction: direction || 'asc' }; return this; }
-    currentOnly(enabled = true) { this._currentOnly = !!enabled; return this; }
+    currentOnly(enabled = true) { this._currentOnly = !!enabled; if (this._currentOnly) { this._from = null; this._to = null; } return this; }
     dateRange(from, to) { this._from = from || null; this._to = to || null; this._currentOnly = false; return this; }
     limit(n) { this._limit = Math.min(Math.max(Number(n) || 100, 1), 500); return this; }
     where(field, op, value) { this._where = { field, op, value }; return this; }

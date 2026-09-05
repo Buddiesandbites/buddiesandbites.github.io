@@ -534,7 +534,6 @@ export default {
             AND (
               (json_extract(data_json, '$.delivered') IS NOT 1
                AND COALESCE(json_extract(data_json, '$.status'), '') != 'completed')
-              OR json_extract(data_json, '$.deliveryDateTime') IS NULL
               OR json_extract(data_json, '$.deliveryDateTime') >= ?
             )
           `;
@@ -604,7 +603,6 @@ export default {
           ? ` AND (
                 (json_extract(data_json, '$.delivered') IS NOT 1
                  AND COALESCE(json_extract(data_json, '$.status'), '') != 'completed')
-                OR json_extract(data_json, '$.deliveryDateTime') IS NULL
                 OR json_extract(data_json, '$.deliveryDateTime') >= ?
               )`
           : (from && to)
