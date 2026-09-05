@@ -62,7 +62,9 @@ self.addEventListener('notificationclick',event=>{
   })());
 });
 
-// Keep fetch pass-through so the PWA remains installable without caching old code.
-self.addEventListener('fetch', event => {
-  event.respondWith(fetch(event.request).catch(() => caches.match(event.request)));
-});
+// A fetch handler must be registered for the PWA to remain installable, but
+// this service worker doesn't cache anything (see install/activate above) —
+// so it must never fall back to caches.match(), which always resolves to
+// undefined here and crashes with "Failed to convert value to 'Response'"
+// on any transient network hiccup. Let the browser handle requests normally.
+self.addEventListener('fetch', () => {});
