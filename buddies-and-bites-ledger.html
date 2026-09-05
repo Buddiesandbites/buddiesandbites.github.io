@@ -339,7 +339,7 @@
     <h1 class="display">Buddies and Bites</h1>
     <div class="sub">Admin sign in — Order Ledger</div>
     <input type="text" id="loginUser" placeholder="Username" autocomplete="username">
-    <input type="password" id="loginPass" placeholder="Staff API key" autocomplete="off">
+    <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password">
     <button id="loginBtn">Sign in</button>
     <div class="login-error" id="loginError"></div>
   </div>
@@ -514,7 +514,6 @@
 <script>
 (function(){
   const $ = (id) => document.getElementById(id);
-  const AUTH_VERIFY_URL = 'https://buddiesandbites-d1-api.buddiesandbites.workers.dev/api/auth/verify';
   const list = $('list'), tabsEl = $('tabs'), nextUp = $('nextUp');
   const sheetBackdrop = $('sheetBackdrop'), sheetTitle = $('sheetTitle');
   const photoUpload = $('photoUpload'), photoInput = $('photoInput'), photoPreview = $('photoPreview'), photoIcon = $('photoIcon'), photoLabel = $('photoLabel'), photoChangeHint = $('photoChangeHint');
@@ -529,16 +528,6 @@
   const hungerbaySyncStatus = $('hungerbaySyncStatus');
   const HUNGERBAY_SYNC_API = window.BNB_HUNGERBAY_SYNC_API || 'https://buddiesandbites-github-io.onrender.com/sync/hungerbay';
   const PUSH_API = window.BNB_PUSH_API || HUNGERBAY_SYNC_API.replace(/\/sync\/hungerbay\/?$/, '');
-  // Same key buddies-and-bites-login.html stores after a successful login,
-  // and the same value the sync server's STAFF_API_KEY env var must hold.
-  function syncApiHeaders(){
-    const headers = {'Content-Type':'application/json'};
-    try{
-      const key = window.localStorage && localStorage.getItem('bnb_staff_key');
-      if(key) headers.Authorization = 'Bearer ' + key;
-    }catch(_){}
-    return headers;
-  }
 
   let orders = [];
   let currentFilter = 'active';
@@ -639,7 +628,7 @@
         });
       }
       const r=await fetch(PUSH_API+'/push/register',{
-        method:'POST',headers:syncApiHeaders(),
+        method:'POST',headers:{'Content-Type':'application/json'},
         body:JSON.stringify({subscription:sub.toJSON(),deviceName:navigator.userAgent.slice(0,160),app:'bnb-order-ledger'})
       });
       if(!r.ok) throw new Error('Could not register this device for push');
@@ -727,7 +716,7 @@
     hungerbaySyncBtn.disabled = true;
     hungerbaySyncStatus.textContent = 'Syncing…';
     try{
-      const res = await fetch(HUNGERBAY_SYNC_API, { method:'POST', headers: syncApiHeaders() });
+      const res = await fetch(HUNGERBAY_SYNC_API, { method:'POST', headers:{'Content-Type':'application/json'} });
       const data = await res.json().catch(()=>({}));
       if(!res.ok || data.ok === false) throw new Error(data.error || 'Sync failed');
       hungerbaySyncStatus.textContent = 'Synced ' + (data.count || 0) + ' order(s)';
@@ -743,7 +732,7 @@
     const orderId=order.hungerbayOrderId || order.orderNumber;
     if(!orderId) throw new Error('Missing HungerBay order number');
     const res=await fetch(HUNGERBAY_SYNC_API.replace(/\/sync\/hungerbay\/?$/,'')+'/hungerbay/order-status',{
-      method:'POST',headers:syncApiHeaders(),
+      method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({orderId:String(orderId),status:String(status)})
     });
     const data=await res.json().catch(()=>({}));
@@ -890,11 +879,7 @@
 
   function subscribeOrders(){
     if(unsubscribeOrders) unsubscribeOrders();
-    initialOrdersSnapshotDone = false;
-    const q = (historyFromDate && historyToDate)
-      ? ordersCollection.dateRange(historyFromDate, historyToDate)
-      : ordersCollection.currentOnly();
-    unsubscribeOrders = q.onSnapshot((snapshot) => {
+    unsubscribeOrders = ordersCollection.onSnapshot((snapshot) => {
       if(initialOrdersSnapshotDone){
         snapshot.docChanges().forEach(change => {
           const o = { ...change.doc.data(), id: change.doc.id };
@@ -907,49 +892,10 @@
       lastSyncedAt = new Date(); render(); updateLiveSyncBadge(); initialOrdersSnapshotDone = true;
     }, (err) => {
       console.error('D1 sync error', err);
-      const badge=document.getElementById('liveSyncBadge');
-      if(err && err.status === 401){
-        toast('Staff key missing or invalid — log out and log back in on the login page');
-        if(badge) badge.innerHTML='<span style="width:7px;height:7px;border-radius:50%;background:var(--rust);display:inline-block;"></span>Not signed in — log in again';
-        return;
-      }
       toast("Can't sync with the shared database — check your connection");
-      list.innerHTML = '<div class="empty">Unable to connect to the shared order book. Please log out and log in again.</div>';
+      const badge=document.getElementById('liveSyncBadge');
       if(badge) badge.innerHTML='<span style="width:7px;height:7px;border-radius:50%;background:var(--rust);display:inline-block;"></span>Offline — trying to reconnect';
     });
-  }
-
-  function updateHistoryFilterUI(){
-    const show = currentFilter === 'all' || currentFilter === 'completed';
-    historyFilter.classList.toggle('show', show);
-    if(show){
-      historyFrom.value = historyFromDate || '';
-      historyTo.value = historyToDate || '';
-      historyApply.textContent = (historyFromDate && historyToDate) ? 'Update dates' : 'Show dates';
-    }
-  }
-
-  function applyHistoryRange(){
-    if(currentFilter !== 'all' && currentFilter !== 'completed') return;
-    const from = historyFrom.value;
-    const to = historyTo.value;
-    if(!from || !to){ toast('Enter both From and To dates'); return; }
-    if(from > to){ toast('From date cannot be after To date'); return; }
-    historyFromDate = from;
-    historyToDate = to;
-    initialOrdersSnapshotDone = false;
-    list.innerHTML = '<div class="empty">Loading selected dates…</div>';
-    subscribeOrders();
-    updateHistoryFilterUI();
-  }
-
-  function clearHistoryRange(){
-    historyFromDate = null;
-    historyToDate = null;
-    initialOrdersSnapshotDone = false;
-    list.innerHTML = '<div class="empty">Loading current orders…</div>';
-    subscribeOrders();
-    updateHistoryFilterUI();
   }
 
   function updateLiveSyncBadge(){
@@ -973,7 +919,6 @@
     }catch(e){
       console.error('save error',e);
       if(e&&e.code==='not-found'){ orders=orders.filter(o=>o.id!==order.id); render(); toast('That order no longer exists — it may have been deleted'); return; }
-      if(e&&e.status===401) throw new Error('Staff key missing or invalid — log out and log back in');
       throw new Error('Could not save to the shared database — check your connection');
     }
   }
@@ -997,11 +942,7 @@
   }
 
   async function deleteOrderStorage(id){
-    try{ await ordersCollection.doc(id).delete(); } catch(e){
-      console.error('delete error',e);
-      if(e&&e.status===401) throw new Error('Staff key missing or invalid — log out and log back in');
-      throw e;
-    }
+    try{ await ordersCollection.doc(id).delete(); } catch(e){ console.error('delete error',e); throw e; }
   }
 
   // ---------- Image compression (WebP first, JPEG fallback — keeps database storage small) ----------
@@ -1469,8 +1410,6 @@
         <div class="status-row">
           ${isCancelled(order) ? `
             <span class="chip-btn" style="background:var(--rust);border-color:var(--rust);color:#fff;cursor:default;">✕ Cancelled — terminal</span>
-          ` : isDelivered(order) ? `
-            <span class="chip-btn delivered-on" style="cursor:default;">✓ Delivered — terminal</span>
           ` : isPendingAcceptance(order) ? `
             <button class="chip-btn accept-btn" style="background:var(--sage);border-color:var(--sage);color:#fff;">✓ Accept order</button>
             ${order.source === 'customer' && order.customerPhone && order.paymentStatus !== 'confirmed' && order.paymentStatus !== 'deposit_paid_awaiting_confirmation' ? `
@@ -1571,7 +1510,7 @@
           if(rejectLockInfo(order).locked){ toast('Reject unlocks 5 minutes after the payment reminder'); return; }
           openRejectSheet(order);
         });
-      } else if(!isCancelled(order) && !isDelivered(order)) {
+      } else if(!isCancelled(order)) {
         card.querySelector('.baked-btn').addEventListener('click', async () => {
           if(isCancelled(order)) return;
           order.baked=!order.baked;
@@ -1700,14 +1639,11 @@
     el.textContent = 'Your device says: ' + now.toLocaleDateString(undefined,{weekday:'short',year:'numeric',month:'short',day:'numeric'}) + ', ' + now.toLocaleTimeString();
   }
   // ---------- Auth ----------
-  // Usernames are labels/roles only. The real secret is the D1 Worker
-  // STAFF_API_KEY and is entered at login; it is intentionally not committed.
   const CREDENTIALS = {
-    'Buddies&bites': { role: 'master', label: 'Master Admin' },
-    'Aman': { role: 'readonly', label: 'Aman (View only)' }
+    'Buddies&bites': { password: 'Buddies@519', role: 'master', label: 'Master Admin' },
+    'Aman': { password: 'Aman@519', role: 'readonly', label: 'Aman (View only)' }
   };
   const AUTH_KEY = 'bnb_auth';
-  const STAFF_KEY_STORAGE_KEY = 'bnb_staff_key';
   let isReadOnly = false;
 
   function applyRoleRestrictions(){
@@ -1724,68 +1660,36 @@
     init();
   }
 
-  async function verifyStaffKey(staffKey){
-    const res = await fetch(AUTH_VERIFY_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + staffKey },
-      body: '{}'
-    });
-    let body = null; try { body = await res.json(); } catch(_) {}
-    if(!res.ok || !body || !body.ok) throw new Error((body && body.error) || 'Invalid Staff API key');
-    return body.role;
-  }
-
-  $('loginBtn').addEventListener('click', async () => {
+  $('loginBtn').addEventListener('click', () => {
     const user = $('loginUser').value.trim();
-    const staffKey = $('loginPass').value.trim();
+    const pass = $('loginPass').value;
     const cred = CREDENTIALS[user];
-    if(!cred || !staffKey){
-      $('loginError').textContent = 'Enter a valid username and Staff API key';
+    if(!cred || cred.password !== pass){
+      $('loginError').textContent = 'Incorrect username or password';
       return;
     }
-    $('loginBtn').disabled = true;
-    $('loginError').textContent = 'Verifying…';
-    try {
-      const serverRole = await verifyStaffKey(staffKey);
-      if(serverRole !== cred.role){
-        throw new Error(cred.role === 'master' ? 'This key is not a Master Admin key' : 'This key is not a View-only key');
-      }
-      const session = { username: user, role: serverRole };
-      localStorage.setItem(AUTH_KEY, JSON.stringify(session));
-      localStorage.setItem(STAFF_KEY_STORAGE_KEY, staffKey);
-      showApp(session);
-    } catch(e) {
-      $('loginError').textContent = e.message || 'Invalid Staff API key';
-    } finally { $('loginBtn').disabled = false; }
+    const session = { username: user, role: cred.role };
+    localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+    showApp(session);
   });
   $('loginPass').addEventListener('keydown', (e) => { if(e.key === 'Enter') $('loginBtn').click(); });
 
   $('logoutLink').addEventListener('click', () => {
     localStorage.removeItem(AUTH_KEY);
-    localStorage.removeItem(STAFF_KEY_STORAGE_KEY);
     location.reload();
   });
 
-  (async function checkExistingSession(){
-    // Never trust a cached browser session by itself. The Worker secret may
-    // have been rotated, and an old key would otherwise leave the Ledger
-    // stuck forever on "Connecting to the shared order book…".
+  (function checkExistingSession(){
     try{
       const raw = localStorage.getItem(AUTH_KEY);
-      const staffKey = localStorage.getItem(STAFF_KEY_STORAGE_KEY);
-      if(raw && staffKey){
+      if(raw){
         const session = JSON.parse(raw);
         if(session && CREDENTIALS[session.username] && CREDENTIALS[session.username].role === session.role){
-          const serverRole = await verifyStaffKey(staffKey);
-          if(serverRole === session.role){
-            showApp(session);
-            return;
-          }
+          showApp(session);
+          return;
         }
       }
     }catch(e){}
-    localStorage.removeItem(AUTH_KEY);
-    localStorage.removeItem(STAFF_KEY_STORAGE_KEY);
     $('loginScreen').style.display = 'flex';
     $('appRoot').style.display = 'none';
   })();

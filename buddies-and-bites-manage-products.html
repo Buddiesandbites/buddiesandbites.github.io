@@ -175,7 +175,7 @@
     <h1 class="display">Buddies and Bites</h1>
     <div class="sub">Admin sign in — Product Manager</div>
     <input type="text" id="loginUser" placeholder="Username" autocomplete="username">
-    <input type="password" id="loginPass" placeholder="Staff API key" autocomplete="off">
+    <input type="password" id="loginPass" placeholder="Password" autocomplete="current-password">
     <button id="loginBtn">Sign in</button>
     <div class="login-error" id="loginError"></div>
   </div>
@@ -259,6 +259,22 @@
   </div>
 
   <div class="card">
+    <h2>AI Settings</h2>
+    <div class="field">
+      <label>Gemini API key (for product suggestions, this page only)</label>
+      <input type="text" id="geminiKeyInput" placeholder="Paste your free Gemini API key here">
+    </div>
+    <div class="field">
+      <label>Gemini API key for shop chatbot (recommended: a separate key)</label>
+      <input type="text" id="geminiShopKeyInput" placeholder="Paste a separate key for the public customer chat">
+    </div>
+    <button class="btn btn-primary" id="saveGeminiKeyBtn">Save AI keys</button>
+    <div class="hint">
+      Free keys from <strong>aistudio.google.com</strong> → "Get API key". The shop chatbot key is used on your public customer page, so anyone visiting could technically see it in their browser's network traffic — using a <em>separate</em> key here (instead of reusing the same one as above) limits the damage if it's ever misused, since you can regenerate just that one without affecting product suggestions.
+    </div>
+  </div>
+
+  <div class="card">
     <h2>Categories</h2>
     <div class="hint" style="margin-bottom:10px;">Turn a category off to hide every cake in it from the shop, without touching individual cakes.</div>
     <div id="categoryList"></div>
@@ -279,7 +295,6 @@
 <script>
 (function(){
   const $ = (id) => document.getElementById(id);
-  const AUTH_VERIFY_URL = 'https://buddiesandbites-d1-api.buddiesandbites.workers.dev/api/auth/verify';
   const toastEl = $('toast');
   function toast(msg){ toastEl.textContent = msg; toastEl.classList.add('show'); setTimeout(()=>toastEl.classList.remove('show'), 2000); }
   function escapeHtml(s){ const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
@@ -291,24 +306,19 @@
   }
 
   // ---------- Firebase ----------
+  const firebaseConfig = {};
+  firebase.initializeApp(firebaseConfig);
   const db = firebase.firestore();
   const productsCol = db.collection('products');
+  const geminiConfigDoc = db.collection('meta').doc('geminiConfig');
   const categoryStatusDoc = db.collection('meta').doc('categoryStatus');
-  const D1_API_BASE = 'https://buddiesandbites-d1-api.buddiesandbites.workers.dev';
-  function staffKeyHeaders(){
-    const headers = {'Content-Type':'application/json'};
-    try{
-      const key = window.localStorage && localStorage.getItem('bnb_staff_key');
-      if(key) headers.Authorization = 'Bearer ' + key;
-    }catch(_){}
-    return headers;
-  }
 
   let products = [];
   let categoryStatus = {};
   let editingId = null;
   let pendingPhoto = null;
   let pendingQr = null;
+  let geminiApiKey = '';
   let pendingFlavours = [];
 
   // ---------- Image compression ----------
@@ -467,8 +477,7 @@
       resetForm();
     }catch(e){
       console.error(e);
-      if(e && e.status === 401){ toast('Staff key missing or invalid — log out and log back in with the correct key'); }
-      else toast('Could not save — check your connection');
+      toast('Could not save — check your connection');
     }
     btn.disabled = false;
   });
@@ -500,11 +509,7 @@
     if(isReadOnly) return;
     try{
       await productsCol.doc(p.id).set({ active: !(p.active !== false) }, { merge: true });
-    }catch(e){
-      console.error('toggle active error', e);
-      if(e && e.status === 401){ toast('Staff key missing or invalid — log out and log back in with the correct key'); }
-      else toast('Could not update');
-    }
+    }catch(e){ toast('Could not update'); }
   }
 
   async function deleteProduct(id){
@@ -513,11 +518,7 @@
     try{
       await productsCol.doc(id).delete();
       toast('Cake removed');
-    }catch(e){
-      console.error('delete product error', e);
-      if(e && e.status === 401){ toast('Staff key missing or invalid — log out and log back in with the correct key'); }
-      else toast('Could not delete');
-    }
+    }catch(e){ toast('Could not delete'); }
   }
 
   // ---------- Render product list ----------
@@ -580,11 +581,7 @@
     const isDisabled = categoryStatus[cat] === false;
     try{
       await categoryStatusDoc.set({ [cat]: isDisabled ? true : false }, { merge: true });
-    }catch(e){
-      console.error('toggle category error', e);
-      if(e && e.status === 401){ toast('Staff key missing or invalid — log out and log back in with the correct key'); }
-      else toast('Could not update category');
-    }
+    }catch(e){ toast('Could not update category'); }
   }
 
   function renderCategories(){
@@ -617,12 +614,28 @@
   }
 
   // ---------- AI (Gemini) product suggestions ----------
-  // The Gemini key lives only as a Worker secret now (GEMINI_API_KEY) —
-  // this page never sees it. It just calls the Worker's proxy route with
-  // the staff key it already has from login.
+  geminiConfigDoc.get().then(doc => {
+    if(doc.exists){
+      geminiApiKey = doc.data().apiKey || '';
+      $('geminiKeyInput').value = geminiApiKey;
+      $('geminiShopKeyInput').value = doc.data().shopApiKey || '';
+    }
+  }).catch(e => console.error(e));
+
+  $('saveGeminiKeyBtn').addEventListener('click', async () => {
+    if(isReadOnly) return;
+    const key = $('geminiKeyInput').value.trim();
+    const shopKey = $('geminiShopKeyInput').value.trim();
+    try{
+      await geminiConfigDoc.set({ apiKey: key, shopApiKey: shopKey }, { merge: true });
+      geminiApiKey = key;
+      toast('AI keys saved');
+    }catch(e){ toast('Could not save — check your connection'); }
+  });
 
   $('suggestAIBtn').addEventListener('click', async () => {
     if(!pendingPhoto){ toast('Upload a photo first'); return; }
+    if(!geminiApiKey){ toast('Add your Gemini API key in AI Settings first'); return; }
     const hint = $('flavourHintInput').value.trim();
     const btn = $('suggestAIBtn');
     const originalLabel = btn.textContent;
@@ -631,21 +644,24 @@
       const match = pendingPhoto.match(/^data:(image\/[a-zA-Z]+);base64,(.+)$/);
       if(!match) throw new Error('Unexpected image format');
       const mimeType = match[1];
-      const imageBase64 = match[2];
+      const base64Data = match[2];
       const prompt = 'You are a product copywriter for an Indian bakery called "Buddies and Bites". Look at this cake photo'
         + (hint ? ' and this flavour/style hint: "' + hint + '"' : '')
         + '. Suggest: 1) a short, appealing product name (max 6 words, no quotes), and 2) a 1-2 sentence mouth-watering menu description. '
         + 'Respond with ONLY valid JSON, no markdown formatting, in exactly this shape: {"name": "...", "description": "..."}';
 
-      const res = await fetch(D1_API_BASE + '/api/ai/product-suggest', {
+      const model = 'gemini-3.6-flash';
+      const res = await fetch('https://generativelanguage.googleapis.com/v1beta/models/' + model + ':generateContent', {
         method: 'POST',
-        headers: staffKeyHeaders(),
-        body: JSON.stringify({ prompt, mimeType, imageBase64 })
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': geminiApiKey },
+        body: JSON.stringify({
+          contents: [{ parts: [ { text: prompt }, { inline_data: { mime_type: mimeType, data: base64Data } } ] }]
+        })
       });
       if(!res.ok){
-        const errBody = await res.json().catch(() => ({}));
-        if(res.status === 401) throw new Error('Staff key missing or invalid — log out and log back in');
-        throw new Error(errBody.error || ('AI request failed (' + res.status + ')'));
+        const errBody = await res.text();
+        console.error('Gemini API error', res.status, errBody);
+        throw new Error('AI request failed (' + res.status + '): ' + (errBody.slice(0, 220) || 'No error details returned'));
       }
       const data = await res.json();
       let text = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text;
@@ -657,7 +673,7 @@
       toast('AI suggestion added — feel free to edit it');
     }catch(e){
       console.error('AI suggestion error', e);
-      toast('AI request failed: ' + (e && e.message ? e.message : 'check your connection'));
+      toast('AI request failed: ' + (e && e.message ? e.message : 'check your API key and connection'));
     }
     btn.disabled = false; btn.textContent = originalLabel;
   });
@@ -746,14 +762,11 @@
   });
 
   // ---------- Auth ----------
-  // Usernames are labels/roles only. The real secret is the D1 Worker
-  // STAFF_API_KEY and is entered at login; it is intentionally not committed.
   const CREDENTIALS = {
-    'Buddies&bites': { role: 'master', label: 'Master Admin' },
-    'Aman': { role: 'readonly', label: 'Aman (View only)' }
+    'Buddies&bites': { password: 'Buddies@519', role: 'master', label: 'Master Admin' },
+    'Aman': { password: 'Aman@519', role: 'readonly', label: 'Aman (View only)' }
   };
   const AUTH_KEY = 'bnb_auth';
-  const STAFF_KEY_STORAGE_KEY = 'bnb_staff_key';
   let isReadOnly = false;
 
   function showApp(session){
@@ -764,49 +777,27 @@
     $('roleLabel').textContent = CREDENTIALS[session.username] ? CREDENTIALS[session.username].label : session.username;
   }
 
-  async function verifyStaffKey(staffKey){
-    const res = await fetch(AUTH_VERIFY_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + staffKey },
-      body: '{}'
-    });
-    let body = null; try { body = await res.json(); } catch(_) {}
-    if(!res.ok || !body || !body.ok) throw new Error((body && body.error) || 'Invalid Staff API key');
-    return body.role;
-  }
-
-  $('loginBtn').addEventListener('click', async () => {
+  $('loginBtn').addEventListener('click', () => {
     const user = $('loginUser').value.trim();
-    const staffKey = $('loginPass').value.trim();
+    const pass = $('loginPass').value;
     const cred = CREDENTIALS[user];
-    if(!cred || !staffKey){
-      $('loginError').textContent = 'Enter a valid username and Staff API key';
+    if(!cred || cred.password !== pass){
+      $('loginError').textContent = 'Incorrect username or password';
       return;
     }
-    $('loginBtn').disabled = true;
-    $('loginError').textContent = 'Verifying…';
-    try {
-      const serverRole = await verifyStaffKey(staffKey);
-      if(serverRole !== cred.role){
-        throw new Error(cred.role === 'master' ? 'This key is not a Master Admin key' : 'This key is not a View-only key');
-      }
-      const session = { username: user, role: serverRole };
-      localStorage.setItem(AUTH_KEY, JSON.stringify(session));
-      localStorage.setItem(STAFF_KEY_STORAGE_KEY, staffKey);
-      showApp(session);
-    } catch(e) {
-      $('loginError').textContent = e.message || 'Invalid Staff API key';
-    } finally { $('loginBtn').disabled = false; }
+    const session = { username: user, role: cred.role };
+    localStorage.setItem(AUTH_KEY, JSON.stringify(session));
+    showApp(session);
   });
   $('loginPass').addEventListener('keydown', (e) => { if(e.key === 'Enter') $('loginBtn').click(); });
-  $('logoutLink').addEventListener('click', () => { localStorage.removeItem(AUTH_KEY); localStorage.removeItem(STAFF_KEY_STORAGE_KEY); location.reload(); });
+  $('logoutLink').addEventListener('click', () => { localStorage.removeItem(AUTH_KEY); location.reload(); });
 
   (function checkExistingSession(){
     try{
       const raw = localStorage.getItem(AUTH_KEY);
       if(raw){
         const session = JSON.parse(raw);
-        if(session && localStorage.getItem(STAFF_KEY_STORAGE_KEY) && CREDENTIALS[session.username] && CREDENTIALS[session.username].role === session.role){
+        if(session && CREDENTIALS[session.username] && CREDENTIALS[session.username].role === session.role){
           showApp(session);
           return;
         }
