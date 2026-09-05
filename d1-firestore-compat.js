@@ -3,7 +3,7 @@
   'use strict';
 
   const API_BASE = 'https://buddiesandbites-d1-api.buddiesandbites.workers.dev';
-  const POLL_MS = 5000;
+  const POLL_MS = 10000;
   const STAFF_KEY_STORAGE_KEY = 'bnb_staff_key';
 
   function apiUrl(path) { return API_BASE + path; }
@@ -176,7 +176,6 @@
     onSnapshot(success, error) {
       let stopped = false;
       let current = new Map();
-      let since = null;
       let initialized = false;
 
       const applyQueryRules = (rows) => {
@@ -222,48 +221,23 @@
       const poll = async () => {
         if (stopped) return;
         try {
-          // First load is a single normal query. After that, only documents
-          // changed since the last server timestamp are fetched.
-          if (!initialized && this.collection.name === 'orders') {
+          // Every cycle re-runs the same full query used for the initial
+          // load, instead of relying on a "what changed since X" cursor.
+          // This costs one extra small request per cycle but guarantees new
+          // and edited orders always show up on the next tick, with no
+          // dependency on server/client clocks or a since-cursor staying in
+          // sync.
+          if (this.collection.name === 'orders') {
             const snap = await this.get();
             const rows = snap.docs.map(d => ({
               id: d.id, data: d.data(),
               updated_at: d._row && d._row.updated_at,
               created_at: d._row && d._row.created_at
             }));
+            const previous = new Map(current);
             current = new Map(rows.map(r => [r.id, r]));
-            since = rows.reduce((max, r) => {
-              const v = r.updated_at || r.created_at || null;
-              return !max || (v && v > max) ? v : max;
-            }, null);
+            success(makeSnapshot(rows, rows, !initialized, previous));
             initialized = true;
-            success(makeSnapshot(rows, rows, true));
-          } else if (this.collection.name === 'orders') {
-            const params = new URLSearchParams({ collection: 'orders', limit: String(this._limit) });
-            if (since) params.set('since', since);
-            if (this._currentOnly) params.set('current', '1');
-            if (this._from && this._to) { params.set('from', this._from); params.set('to', this._to); }
-            const q = '/api/changes?' + params.toString();
-            const body = await request(q);
-            const changed = (body.changes || []).map(x => ({
-              id: x.id,
-              data: x.data,
-              updated_at: x.updated_at,
-              created_at: x.created_at
-            }));
-
-            if (changed.length) {
-              const previous = new Map(current);
-              changed.forEach(r => current.set(r.id, r));
-              const rows = Array.from(current.values());
-              // Keep the newest server timestamp as the cursor.
-              since = changed.reduce((max, r) => {
-                const v = r.updated_at || r.created_at || null;
-                return !max || (v && v > max) ? v : max;
-              }, since);
-              success(makeSnapshot(rows, changed, false, previous));
-              current = new Map(rows);
-            }
           } else {
             const snap = await this.get();
             const key = JSON.stringify(snap.docs.map(d => ({ id:d.id, data:d.data() })));
